@@ -68,6 +68,9 @@ Answer `y` to add the marketplace, then pick the user scope. The change applies 
 
 - `alsoDefer`: comma-separated tool names to defer as well, for example the tools of an MCP connector you rarely use.
 - `keepInFront`: comma-separated names from the default list to leave in the prompt.
+- `statusLine`: show the savings under the prompt (on by default).
+
+These options set the defaults; the settings file (see "Choose what it hides and what it shows" below) overrides them.
 
 Set them with `/plugin configure defer-tools@defer-tools`, or from a shell:
 
@@ -75,11 +78,124 @@ Set them with `/plugin configure defer-tools@defer-tools`, or from a shell:
 printf '%s' '{"keepInFront":"Workflow"}' | claude plugin configure defer-tools@defer-tools --values-stdin
 ```
 
+## See what it saves
+
+Since 0.2.0 the mod shows its savings while you work, in the CLI and in the desktop app.
+
+- **Status line**, under the prompt: `defer-tools: ▼ 15k tokens saved per request · 1 ToolSearch hop, 1 empty search`. The number counts up when it changes. Turn it off, or show the number alone, with `/defer-settings`.
+- **Pane**, opened with `/defer-savings`: charts for the current conversation, which animate when the pane opens (press Replay to see it again). In the desktop app, VS Code and mobile it is an SVG chart with hover tooltips; in the terminal it is drawn with coloured block characters. Where no pane can be drawn, the command answers with the same numbers as text.
+
+Desktop app (SVG pane, follows the light or dark theme):
+
+![The /defer-savings pane in the desktop app: a count-up number, before and after bars, a bar per tool and the ToolSearch costs, drawn from an automated test with test data](docs/screenshots/pane-desktop-dark.gif)
+
+Terminal (CLI):
+
+![The /defer-savings pane in the terminal, drawn from an automated test with test data](docs/screenshots/pane-terminal-cli.gif)
+
+![The status line counting up, drawn from an automated test with test data](docs/screenshots/status-line-cli.gif)
+
+These pictures are drawn from `tests/screenshots.test.tsx` with test data, not taken from a real session: the terminal ones from the element tree the mod returned for each frame, the desktop ones from the SVG it returned (`docs/screenshots/pane-svg-desktop.svg` is that SVG, and plays in a browser). `claude plugin test . | python3 scripts/render-screenshots.py` draws them again (needs Pillow and CairoSVG).
+
+The pane shows:
+
+- A big number: tokens saved per request now, net (the schemas not sent, minus the system-prompt line the mod adds).
+- Two bars for the first request of the conversation: as the API reported it, and about what it would have been without the mod.
+- A bar per deferred tool with its tokens and where that figure comes from. A tool ToolSearch has loaded is drawn dashed grey: its schema rides in the conversation from then on, so it stops counting as saved.
+- One bar for this conversation: the net saved in blue, and what the prompt line and ToolSearch took back in orange.
+- Three counts for ToolSearch: hops (searches that loaded one of the mod's tools), empty searches (searches that found nothing), and the extra model requests whose only tool calls were ToolSearch.
+
+The text version of the pane (read by screen readers, and the command's answer where no pane is drawn) also gives a total over the sessions on this computer.
+
+Every number says where it comes from, so the display does not overstate:
+
+| Label | Meaning |
+| --- | --- |
+| live | From this session's API usage (input and output tokens of real requests). |
+| README table | The table above: a `claude -p` run minus the same run with `--disallowedTools`, Claude Code 2.1.318. Used for `Artifact`, `Workflow`, `ScheduleWakeup`, `ReportFindings`. |
+| Claude Code estimate | Claude Code's own estimate of an MCP tool's schema, as `/context` counts it (no API call). |
+| rough estimate | This mod's estimate from the tool's description alone, about 4 characters per token. It leaves out the schema's parameters, so it is low. Used for other tools, like the desktop app's `SearchPlugins`. |
+| estimate | The prompt line and the ToolSearch calls and results, also about 4 characters per token. |
+
+How it counts:
+
+- Only tools Claude Code would have kept in front count. A tool Claude Code already lists behind ToolSearch by itself (most MCP tools) is shown as "not counted".
+- Net for the conversation = schema tokens not sent over all requests, minus the prompt line on every request, minus the hops and empty searches with their results (estimate), minus the output tokens of the extra requests (live).
+- "Schema tokens not sent" adds the saving of every request. Most of those tokens would have been prompt-cache reads, which cost less than new input, so treat that total as context kept free, not as money saved.
+- Each hop also costs one more model request, which reads the conversation again (mostly from the cache). The net subtracts that request's output tokens, but not the context it reads again.
+- Only the main conversation is counted, not subagents. A `/clear` starts the counts over.
+
+## Choose what it hides and what it shows
+
+Since 0.3.0 you choose. Type `/defer-settings`, or press Settings in the `/defer-savings` pane:
+
+- **Tools:** every tool the session offers, with its tokens per request and where that figure comes from. Press a tool's button to switch it between Hidden (behind ToolSearch) and Loaded (in every request); Default puts it back on the default list. The top line adds up what your choices keep out of every request. A tool change applies from the next `/clear` or new session, so the prompt cache is not rewritten mid-conversation; until then the row says where the tool is now.
+- **Display:** show or hide each chart, move charts up, turn the animation off, and set the status line to the number and ToolSearch counts, the number only, or off. These apply at once.
+
+Desktop app:
+
+![The /defer-settings view in the desktop app, drawn from an automated test with test data](docs/screenshots/settings-desktop.gif)
+
+Terminal:
+
+![The /defer-settings view in the terminal, drawn from an automated test with test data](docs/screenshots/settings-terminal.gif)
+
+The settings live in `~/.claude/defer-tools.json` (on Windows, in `.claude` under your user folder), which you can also edit by hand; a hand edit counts from the next session or the next time the settings open. Every field is optional:
+
+```json
+{
+  "tools": { "Workflow": "keep", "mcp__github__create_issue": "defer" },
+  "charts": ["hero", "perTool", "conversation", "toolSearch"],
+  "animate": true,
+  "statusLine": "full"
+}
+```
+
+- `tools`: `"defer"` hides a tool behind ToolSearch, `"keep"` sends it with every request. A tool not listed follows the default list (with the `alsoDefer` and `keepInFront` options).
+- `charts`: the pane's charts in the order shown; leave one out to hide it. The charts are `hero` (the big number), `firstRequest`, `perTool`, `conversation` and `toolSearch`.
+- `animate`: `false` draws the pane and the status line without the count-up.
+- `statusLine`: `"full"`, `"number"` or `"off"`. Without the file, the `statusLine` option decides between `"full"` and `"off"`.
+
+A value the mod does not understand is skipped and the default kept; the settings view says what it skipped.
+
+The same changes by typing, handy in the CLI:
+
+```
+/defer-settings keep Workflow
+/defer-settings defer mcp__github__create_issue,mcp__github__list_issues
+/defer-settings default Workflow
+/defer-settings charts hero,perTool
+/defer-settings animate off
+/defer-settings status number
+```
+
+## What each tool is for
+
+Since 0.4.0 every tool in the lists says what it is for, in one plain line, with its tokens and whether it is hidden or loaded:
+
+- **Desktop app, VS Code, mobile:** point at a tool. In the settings view the line appears under the row; in the `/defer-savings` pane a card appears over the per-tool chart.
+- **Terminal:** a terminal pane cannot see the mouse pointer, so the settings view opens with the keyboard on its first tool, and the tool you move to with Tab or the arrow keys shows its line. In the `/defer-savings` pane, press **What do these tools do?** to add a line under each tool's bar.
+
+The lines for Claude Code's own tools and the default list are written by hand in `hooks/about.ts`. For any other tool, the line is the first sentence of the tool's own description, and an MCP tool's line names its connector.
+
+Desktop app, pointer on a tool (the pointer is drawn by the screenshot script):
+
+![The settings view with the pointer on Bash, drawn from an automated test with test data](docs/screenshots/settings-hover-desktop.gif)
+
+![The savings pane's hover card on each tool, drawn from an automated test with test data](docs/screenshots/pane-desktop-hover-dark.gif)
+
+Terminal, keyboard focus on a tool:
+
+![The terminal settings view with the focus moving down the tools, drawn from an automated test with test data](docs/screenshots/settings-focus-terminal.gif)
+
+![The terminal savings pane with the tool notes on, drawn from an automated test with test data](docs/screenshots/pane-terminal-explain-cli.png)
+
 ## Costs and limits
 
 - The first call of a deferred tool in a session takes one extra ToolSearch step.
 - The added line costs about 130 tokens in the CLI and about 290 in the desktop app.
-- The mod uses the mods API (`tool.describe`, `prompt.compose`) of the builds above; a later build may change it.
+- The mod uses the mods API (`tool.describe`, `prompt.compose`, and for the display and settings `turn.step`, `tool.call`, `$.session.usage`, `$.ui.status`, `$.fs`, `ui.focus`, a pane with hover) of the builds above; a later build may change it.
+- The savings display and the settings were tested with `claude plugin test` on Claude Code 2.1.322 (`tests/savings.test.tsx`, `tests/settings.test.tsx`, `tests/about.test.tsx`), not yet in a live CLI or desktop session. The test kit cannot press Tab, so the terminal's focus line is checked only up to naming the focused row.
 - Some MCP connectors expect their tools to stay in front. The Claude Docs connector's own help says its `batch`, `guide` and `update` tools are "always listed"; deferring them worked in the test above, but if a connector misbehaves, put its tools in `keepInFront` or leave them out of `alsoDefer`.
 
 ## Uninstall
