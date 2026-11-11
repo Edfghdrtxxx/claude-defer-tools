@@ -1,8 +1,11 @@
 {
   "name": "defer-tools",
-  "version": "0.1.0",
-  "description": "Lists rarely used built-in and host tools behind ToolSearch, so their schemas load only when a session asks for them.",
-  "author": { "name": "Edfghdrtxxx", "url": "https://github.com/Edfghdrtxxx" },
+  "version": "0.2.0",
+  "description": "Lists rarely used built-in and host tools behind ToolSearch, so their schemas load only when a session asks for them, and shows the tokens that saves.",
+  "author": {
+    "name": "Edfghdrtxxx",
+    "url": "https://github.com/Edfghdrtxxx"
+  },
   "license": "MIT",
   "userConfig": {
     "alsoDefer": {
@@ -16,6 +19,13 @@
       "title": "Keep in front",
       "description": "Comma-separated tool names from the default list to leave in the prompt, e.g. Workflow.",
       "default": ""
+    },
+    "statusLine": {
+      "type": "boolean",
+      "title": "Show savings in the status line",
+      "description": "Show a line under the prompt with the tokens defer-tools saves per request.",
+      "default": true
     }
-  }
+  },
+  "types": "./types/index.d.ts"
 }

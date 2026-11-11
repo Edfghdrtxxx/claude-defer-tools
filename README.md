@@ -68,6 +68,7 @@ Answer `y` to add the marketplace, then pick the user scope. The change applies 
 
 - `alsoDefer`: comma-separated tool names to defer as well, for example the tools of an MCP connector you rarely use.
 - `keepInFront`: comma-separated names from the default list to leave in the prompt.
+- `statusLine`: show the savings under the prompt (on by default).
 
 Set them with `/plugin configure defer-tools@defer-tools`, or from a shell:
 
@@ -75,11 +76,45 @@ Set them with `/plugin configure defer-tools@defer-tools`, or from a shell:
 printf '%s' '{"keepInFront":"Workflow"}' | claude plugin configure defer-tools@defer-tools --values-stdin
 ```
 
+## See what it saves
+
+Since 0.2.0 the mod shows its savings while you work, in the CLI and in the desktop app.
+
+- **Status line**, under the prompt: `defer-tools: saves 16k tokens per request · 1 ToolSearch hop, 0 empty searches`. Turn it off with the `statusLine` option.
+- **Pane**, opened with `/defer-savings`: the full count for the current conversation. Where no pane can be drawn, the command answers with the same report as text.
+
+The pane shows:
+
+- Saved per request now, net: the schemas not sent, minus the system-prompt line the mod adds.
+- The first request of the conversation as the API reported it, and about what it would have been without the mod.
+- Each deferred tool with its tokens, where that figure comes from, and whether ToolSearch has loaded it. A loaded tool's schema rides in the conversation from then on, so it stops counting as saved.
+- ToolSearch: hops (searches that loaded one of the mod's tools), empty searches (searches that found nothing), and the extra model requests whose only tool calls were ToolSearch.
+- This conversation's totals, and a total over the sessions on this computer.
+
+Every number says where it comes from, so the display does not overstate:
+
+| Label | Meaning |
+| --- | --- |
+| live | From this session's API usage (input and output tokens of real requests). |
+| measured (table) | The table above: a `claude -p` run minus the same run with `--disallowedTools`, Claude Code 2.1.318. Used for `Artifact`, `Workflow`, `ScheduleWakeup`, `ReportFindings`. |
+| Claude Code estimate | Claude Code's own estimate of an MCP tool's schema, as `/context` counts it (no API call). |
+| rough estimate | This mod's estimate from the tool's description alone, about 4 characters per token. It leaves out the schema's parameters, so it is low. Used for other tools, like the desktop app's `SearchPlugins`. |
+| estimate | The prompt line and the ToolSearch calls and results, also about 4 characters per token. |
+
+How it counts:
+
+- Only tools Claude Code would have kept in front count. A tool Claude Code already lists behind ToolSearch by itself (most MCP tools) is shown as "not counted".
+- Net for the conversation = schema tokens not sent over all requests, minus the prompt line on every request, minus the tokens of hops and empty searches.
+- "Schema tokens not sent" adds the saving of every request. Most of those tokens would have been prompt-cache reads, which cost less than new input, so treat that total as context kept free, not as money saved.
+- Each hop also costs one more model request, which reads the conversation again (mostly from the cache). The pane counts those requests and their output tokens, but does not subtract the context they read.
+- Only the main conversation is counted, not subagents. A `/clear` starts the counts over.
+
 ## Costs and limits
 
 - The first call of a deferred tool in a session takes one extra ToolSearch step.
 - The added line costs about 130 tokens in the CLI and about 290 in the desktop app.
-- The mod uses the mods API (`tool.describe`, `prompt.compose`) of the builds above; a later build may change it.
+- The mod uses the mods API (`tool.describe`, `prompt.compose`, and for the display `turn.step`, `tool.call`, `$.session.usage`, `$.ui.status`, a pane) of the builds above; a later build may change it.
+- The savings display was tested with `claude plugin test` on Claude Code 2.1.322 (`tests/savings.test.tsx`, all four surfaces), not yet in a live CLI or desktop session.
 - Some MCP connectors expect their tools to stay in front. The Claude Docs connector's own help says its `batch`, `guide` and `update` tools are "always listed"; deferring them worked in the test above, but if a connector misbehaves, put its tools in `keepInFront` or leave them out of `alsoDefer`.
 
 ## Uninstall
