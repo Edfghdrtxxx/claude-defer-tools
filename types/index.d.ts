@@ -52,6 +52,12 @@ export type DeferToolsSavings = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'defer-tools': { savings: Shaped<DeferToolsSavings> }
+    'defer-tools': {
+      savings: Shaped<DeferToolsSavings>
+      /** The terminal pane's animation frame, 0 to its last; the last is the still picture. */
+      frame: number
+      /** When the pane's animation last started (ms); SVG surfaces animate within a moment of it. */
+      playedAt: number
+    }
   }
 }

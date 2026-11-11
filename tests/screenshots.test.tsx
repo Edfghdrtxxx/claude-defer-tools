@@ -1,7 +1,10 @@
 // Drives the mod through a made-up session and prints what it draws, for docs/screenshots.
 // scripts/render-screenshots.py turns the printed lines into the PNGs. The numbers are test
 // data shaped like the README's measurements, not a real session.
-import { expect, test } from 'claude-code/testing'
+import { mock, test } from 'claude-code/testing'
+
+import { FRAMES, FRAME_MS, svgPanel, visualOf } from '../hooks/visual'
+import type { DeferToolsSavings } from '../types'
 
 declare const console: { log: (line: string) => void }
 
@@ -55,6 +58,13 @@ const DESKTOP: Scenario = {
 
 for (const scenario of [CLI, DESKTOP]) {
   test(`screenshot data: ${scenario.name}`, async ($, on) => {
+    const clock = mock.clock(on)
+    // Keep the mod's latest savings, to draw stills of the SVG along its animation.
+    let latest: DeferToolsSavings | undefined
+    on('state.set', ($, e, next) => {
+      if (e.key === 'savings') latest = (e.value as { value: DeferToolsSavings }).value
+      return next(e)
+    })
     const statuses: string[] = []
     on('ui.status', (_, e) => {
       if (e.text !== undefined) statuses.push(e.text)
@@ -63,7 +73,6 @@ for (const scenario of [CLI, DESKTOP]) {
     on('store.get', () => ({ value: undefined }))
     on('store.set', () => ({ value: undefined }))
     on('session.id', () => ({ value: 's' }))
-    on('clock.now', () => ({ value: 0 }))
     on('session.usage', () => ({
       value: {
         startedAt: 0,
@@ -124,16 +133,31 @@ for (const scenario of [CLI, DESKTOP]) {
     for (const index of [2, 3, 4]) await step(index)
     await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
 
-    let first: string[] | undefined
-    for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
-      const ui = await $.ui.mount({ ...PANE, surface })
-      const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
-      const buttons = (await ui.findAll({ type: 'Button' })).map(b => String(b.props.label ?? b.text))
-      await ui.unmount()
-      // Every surface draws the same words.
-      if (first === undefined) first = texts
-      else expect(texts).toEqual(first)
-      console.log(`SHOT ${JSON.stringify({ scenario: scenario.name, surface, status: statuses.at(-1), texts, buttons })}`)
+    await clock.advance(1000)
+    const status = statuses.at(-1)
+
+    // Terminal: press Replay and keep each frame of the count-up.
+    const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    await term.press({ key: 'replay' })
+    for (let f = 0; f <= FRAMES; f++) {
+      const root = await term.find({ type: 'Box' })
+      console.log(`FRAME ${JSON.stringify({ scenario: scenario.name, frame: f, tree: root })}`)
+      await clock.advance(FRAME_MS)
+    }
+    await term.unmount()
+
+    // Status line frames: the count-up from zero after the first tool is described.
+    console.log(`STATUS ${JSON.stringify({ scenario: scenario.name, frames: statuses, final: status })}`)
+
+    // Desktop, VS Code, mobile: the SVG the pane draws (animated), and stills along the way.
+    const desk = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    const svg = await desk.find({ type: 'Svg' })
+    await desk.unmount()
+    const v = visualOf(latest!)
+    console.log(`SVG ${JSON.stringify({ scenario: scenario.name, animated: svg?.props.source, alt: svg?.props.alt })}`)
+    for (let f = 0; f <= 30; f++) {
+      for (const theme of ['dark', 'light'] as const)
+        console.log(`SVGFRAME ${JSON.stringify({ scenario: scenario.name, theme, frame: f, svg: svgPanel(v, { animate: false, progress: f / 30, theme }) })}`)
     }
   })
 }

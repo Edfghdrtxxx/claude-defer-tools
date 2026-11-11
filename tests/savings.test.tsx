@@ -1,4 +1,13 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
+
+// The SVG surfaces carry the whole report as the figure's alt text: read a line of it.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const lineOf = async (ui: any, pattern: RegExp): Promise<string | undefined> => {
+  const svg = await ui.find({ type: 'Svg' })
+  return String(svg?.props.alt ?? '')
+    .split('\n')
+    .find(line => pattern.test(line))
+}
 
 const PANE = {
   plugin: 'defer-tools',
@@ -18,6 +27,7 @@ const ENGINE = { plugin: 'engine', tier: 'core' } as const
 const USAGE = { input_tokens: 5, cache_read_input_tokens: 21000, cache_creation_input_tokens: 156, output_tokens: 40, model: 'm' }
 
 test('counts what it defers, a hop, an empty search and the requests, on every surface', async ($, on) => {
+  const clock = mock.clock(on)
   const statuses: (string | undefined)[] = []
   on('ui.status', (_, e) => {
     statuses.push(e.text)
@@ -39,7 +49,10 @@ test('counts what it defers, a hop, an empty search and the requests, on every s
   expect(deferred.isDeferred).toBe(true)
   await $.tool.describe({ tool: 'Workflow', description: 'w', provider: ENGINE })
   await $.tool.describe({ tool: 'mcp__visualize__read_me', description: 'x'.repeat(400), isDeferred: true, provider: ENGINE })
-  expect(statuses.at(-1)).toBe('defer-tools: saves 15k tokens per request')
+  await clock.advance(1000)
+  expect(statuses.at(-1)).toBe('defer-tools: ▼ 15k tokens saved per request')
+  // It counted up to that figure.
+  expect(statuses.filter(t => t?.startsWith('defer-tools: ▼')).length).toBeGreaterThan(3)
 
   // First request: one ToolSearch call only, so it is an extra round trip.
   toolUses = [{ name: 'ToolSearch', input: { query: 'select:Workflow' } }]
@@ -60,19 +73,30 @@ test('counts what it defers, a hop, an empty search and the requests, on every s
   await second.result
 
   // Workflow is loaded now, so only Artifact still saves.
-  expect(statuses.at(-1)).toBe('defer-tools: saves 13k tokens per request · 1 ToolSearch hop, 1 empty search')
+  await clock.advance(1000)
+  expect(statuses.at(-1)).toBe('defer-tools: ▼ 13k tokens saved per request · 1 ToolSearch hop, 1 empty search')
 
-  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+  // Terminal: big digits and bars, every number also in text.
+  const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const hero = await term.find({ type: 'Raster', key: 'hero' })
+  expect(hero?.props.columns).toBe(5 * 4 + 2) // "12,773": five 3-wide digits and a comma, each with a gap
+  expect((await term.find({ type: 'Text', text: /fewer tokens/ }))?.text).toContain('14,725 fewer tokens')
+  expect(await term.find({ type: 'Raster', key: 'tool-Workflow' })).toBeDefined()
+  await term.unmount()
+
+  for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect((await ui.find({ type: 'Text', text: /^Saved per request now/ }))?.text).toBe('Saved per request now: 12,773 tokens (net)')
-    expect((await ui.find({ type: 'Text', text: /First request/ }))?.text).toBe('First request of this conversation: 21,161 tokens (live)')
-    expect((await ui.find({ type: 'Text', text: /Without defer-tools/ }))?.text).toBe('  Without defer-tools: about 35,886')
-    expect((await ui.find({ type: 'Text', text: /Workflow:/ }))?.text).toBe('  Workflow: 1,952 (README table), loaded by ToolSearch')
-    expect((await ui.find({ type: 'Text', text: /Already behind/ }))?.text).toContain('mcp__visualize__read_me')
-    expect((await ui.find({ type: 'Text', text: /Empty searches/ }))?.text).toMatch(/^  Empty searches: 1, about \d+ tokens \(estimate\)$/)
-    expect((await ui.find({ type: 'Text', text: /Extra model requests/ }))?.text).toBe('  Extra model requests: 1, 40 output tokens (live)')
-    expect((await ui.find({ type: 'Text', text: /defers by itself/ }))?.text).toBe('  Searches for tools Claude Code defers by itself: 1 (not counted)')
-    expect((await ui.find({ type: 'Text', text: /not sent: 27/ }))?.text).toBe('  Schema tokens not sent: 27,498 (mostly cache reads)')
+    const svg = await ui.find({ type: 'Svg' })
+    expect(String(svg?.props.source)).toContain('SAVED ON EVERY REQUEST')
+    expect((await lineOf(ui, /^Saved per request now/))).toBe('Saved per request now: 12,773 tokens (net)')
+    expect((await lineOf(ui, /First request/))).toBe('First request of this conversation: 21,161 tokens (live)')
+    expect((await lineOf(ui, /Without defer-tools/))).toBe('  Without defer-tools: about 35,886')
+    expect((await lineOf(ui, /Workflow:/))).toBe('  Workflow: 1,952 (README table), loaded by ToolSearch')
+    expect((await lineOf(ui, /Already behind/))).toContain('mcp__visualize__read_me')
+    expect((await lineOf(ui, /Empty searches/))).toMatch(/^  Empty searches: 1, about \d+ tokens \(estimate\)$/)
+    expect((await lineOf(ui, /Extra model requests/))).toBe('  Extra model requests: 1, 40 output tokens (live)')
+    expect((await lineOf(ui, /defers by itself/))).toBe('  Searches for tools Claude Code defers by itself: 1 (not counted)')
+    expect((await lineOf(ui, /not sent: 27/))).toBe('  Schema tokens not sent: 27,498 (mostly cache reads)')
     await ui.unmount()
   }
 })
@@ -84,7 +108,7 @@ test('a tool kept in front is not deferred and not counted', { options: { keepIn
   expect(kept.isDeferred).toBeUndefined()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.find({ type: 'Text' }))?.text).toMatch(/saves nothing here yet/)
+  expect((await ui.find({ type: 'Text', text: /saves nothing/ }))?.text).toMatch(/saves nothing here yet/)
   await ui.unmount()
 })
 
@@ -98,8 +122,8 @@ test('a /clear starts the counts over and unloads the tools', async ($, on) => {
   await $.session.end({ reason: 'clear', sessionId: 's', resume: { sessionId: 's' } as never })
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect((await ui.find({ type: 'Text', text: /^Saved per request now/ }))?.text).toBe('Saved per request now: 12,773 tokens (net)')
-  expect((await ui.find({ type: 'Text', text: /Hops for/ }))?.text).toBe("  Hops for the mod's tools: 0, about 0 tokens (estimate)")
+  expect((await lineOf(ui, /^Saved per request now/))).toBe('Saved per request now: 12,773 tokens (net)')
+  expect((await lineOf(ui, /Hops for/))).toBe("  Hops for the mod's tools: 0, about 0 tokens (estimate)")
   await ui.unmount()
 })
 
@@ -146,12 +170,12 @@ test('the prompt line is subtracted, an MCP tool takes Claude Code estimate, and
 
   await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
 
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const note = Math.ceil((line?.text.length ?? 0) / 4)
-  expect((await ui.find({ type: 'Text', text: /^Saved per request now/ }))?.text).toBe(
+  expect((await lineOf(ui, /^Saved per request now/))).toBe(
     `Saved per request now: ${(900 - note).toLocaleString('en-US')} tokens (net)`,
   )
-  expect((await ui.find({ type: 'Text', text: /show_widget:/ }))?.text).toBe(
+  expect((await lineOf(ui, /show_widget:/))).toBe(
     '  mcp__visualize__show_widget: 900 (Claude Code estimate), not loaded',
   )
   await ui.unmount()

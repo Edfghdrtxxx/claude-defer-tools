@@ -85,9 +85,9 @@ export const full = (n: number): string => Math.round(n).toLocaleString('en-US')
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`
 
 /** The one status-line entry. */
-export const statusLine = (s: DeferToolsSavings): string | undefined => {
+export const statusLine = (s: DeferToolsSavings, shown = netNow(s)): string | undefined => {
   if (!s.tools.some(t => t.wasInFront)) return undefined
-  const parts = [`defer-tools: saves ${short(netNow(s))} tokens per request`]
+  const parts = [`defer-tools: ▼ ${short(Math.round(shown))} tokens saved per request`]
   if (s.hops > 0 || s.emptySearches > 0)
     parts.push(`${plural(s.hops, 'ToolSearch hop')}, ${plural(s.emptySearches, 'empty search', 'empty searches')}`)
   return parts.join(' · ')

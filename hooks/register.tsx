@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { ElementTable, EngineInterface, Register, Timer } from 'claude-code'
 
 import type { DeferToolsSavings } from '../types'
 import {
@@ -12,7 +12,10 @@ import {
   toolRow,
   trimRecords,
   savedNow,
+  netNow,
+  full,
 } from './savings'
+import { FRAMES, FRAME_MS, barRaster, bigNumber, ease, pct, sourceTag, svgPanel, T, visualOf } from './visual'
 import type { SessionRecord, Totals } from './savings'
 
 // Tools whose full schema is sent with every request although most sessions never call them.
@@ -39,6 +42,9 @@ const STORE_KEY = 'sessions-v1'
 // Change the tag when the fields of DeferToolsSavings change: a reload then starts fresh.
 const savings = atom({ plugin: 'defer-tools', key: 'savings' } as const, emptySavings(), { shape: 'savings-1' })
 
+const frame = atom({ plugin: 'defer-tools', key: 'frame' } as const, FRAMES)
+const playedAt = atom({ plugin: 'defer-tools', key: 'playedAt' } as const, 0)
+
 const names = (value: unknown): string[] =>
   typeof value === 'string' ? value.split(',').map(s => s.trim()).filter(Boolean) : []
 
@@ -47,8 +53,65 @@ let showStatus = true
 
 async function change($: EngineInterface, fn: (s: DeferToolsSavings) => DeferToolsSavings): Promise<DeferToolsSavings> {
   const next = await update($, savings, fn)
-  if (showStatus) $.ui.status(statusLine(next))
+  if (showStatus) countStatus($, next)
   return next
+}
+
+// The status line counts up (or down) to a new figure over half a second.
+let shownNet = 0
+let latest: DeferToolsSavings = emptySavings()
+let statusTimer: Timer | undefined
+const STATUS_STEPS = 10
+
+function countStatus($: EngineInterface, s: DeferToolsSavings): void {
+  latest = s
+  const target = netNow(s)
+  if (target === shownNet) {
+    // Same figure: a running count picks up the new text as it goes; else show it now.
+    if (statusTimer === undefined) $.ui.status(statusLine(s))
+    return
+  }
+  const from = shownNet
+  shownNet = target
+  statusTimer?.cancel()
+  statusTimer = undefined
+  if (statusLine(s) === undefined) {
+    $.ui.status(undefined)
+    return
+  }
+  let step = 1
+  $.ui.status(statusLine(s, from + (target - from) * ease(step / STATUS_STEPS)))
+  try {
+    const timer = $.clock.every(50, () => {
+      step += 1
+      const done = step >= STATUS_STEPS
+      $.ui.status(statusLine(latest, done ? target : from + (target - from) * ease(step / STATUS_STEPS)))
+      if (done) {
+        timer.cancel()
+        if (statusTimer === timer) statusTimer = undefined
+      }
+    })
+    statusTimer = timer
+  } catch {
+    $.ui.status(statusLine(s))
+  }
+}
+
+// Plays the pane's animation: the terminal steps through frames, the SVG surfaces run their own.
+let playTimer: Timer | undefined
+
+async function play($: EngineInterface): Promise<void> {
+  playTimer?.cancel()
+  const now = await $.clock.now()
+  await update($, playedAt, () => now)
+  await update($, frame, () => 0)
+  let at = 0
+  const timer = $.clock.every(FRAME_MS, () => {
+    at += 1
+    void update($, frame, () => Math.min(FRAMES, at))
+    if (at >= FRAMES) timer.cancel()
+  })
+  playTimer = timer
 }
 
 // Asks Claude Code for its own estimate of each MCP tool's schema (a local estimate, no API call).
@@ -209,25 +272,144 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: COMMAND }, async $ => {
     const opened = await $.ui.open({ id: PANE, title: 'Token savings' })
-    if (opened.isPlaced) return { text: 'Opened the defer-tools savings pane.' }
+    if (opened.isPlaced) {
+      await play($).catch(() => undefined)
+      return { text: 'Opened the defer-tools savings pane.' }
+    }
     // No surface draws a pane here: answer with the report itself.
     return { text: reportLines(await read($, savings), await readTotals($)).join('\n') }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
     const s = await read($, savings)
-    const lines = reportLines(s, await readTotals($))
+    const v = visualOf(s)
+
+    // Terminal: big block digits and coloured bars, stepped frame by frame.
+    if (e.surface === 'terminal') {
+      const { Box, Text, Button, Raster } = $.ui.resolve(e) as ElementTable<'terminal'>
+      const p = ease((await read($, frame)) / FRAMES)
+      const LABEL = 24
+      const barW = Math.max(10, Math.min(48, e.props.bodyColumns - LABEL - 24))
+      const label = (text: string) => <Text>{(text.length > LABEL - 1 ? `${text.slice(0, LABEL - 2)}…` : text).padEnd(LABEL)}</Text>
+      const buttons = (
+        <Box flexDirection="row">
+          <Button key="replay" label="Replay" onPress={() => play($).catch(() => undefined)} />
+          <Text> </Text>
+          <Button key="refresh" label="Refresh estimates" onPress={() => readEngineEstimates($).catch(() => undefined)} />
+        </Box>
+      )
+      if (v.isEmpty)
+        return (
+          <Box flexDirection="column">
+            <Text>No tool from the list was in front in this session, so defer-tools saves nothing here yet.</Text>
+            {buttons}
+          </Box>
+        )
+      const maxTool = Math.max(1, ...v.tools.map(t => t.tokens))
+      const total = Math.max(1, v.session.notSent)
+      const costShare = (p * v.session.overhead) / total
+      const costBump = v.session.overhead > 0 ? Math.max(0, 0.5 / barW - costShare) : 0
+      return (
+        <Box flexDirection="column">
+          <Text dimColor>SAVED ON EVERY REQUEST (NET)</Text>
+          <Box flexDirection="row" alignItems="flex-end">
+            <Raster key="hero" {...bigNumber(Math.round(v.net * p), T.saved)} />
+            <Text> tokens</Text>
+          </Box>
+          <Text dimColor>
+            {full(v.schemas)} schema tokens minus {full(v.note)} for the prompt line (est.)
+          </Text>
+          {v.before && <Text> </Text>}
+          {v.before && <Text dimColor>FIRST REQUEST OF THIS CONVERSATION</Text>}
+          {v.before && (
+            <Box flexDirection="row">
+              {label('Without defer-tools')}
+              <Raster key="without" {...barRaster(barW, [{ fraction: p, color: T.without }])} />
+              <Text> {full(Math.round(v.before.without * p))} (about)</Text>
+            </Box>
+          )}
+          {v.before && (
+            <Box flexDirection="row">
+              {label('With defer-tools')}
+              <Raster key="with" {...barRaster(barW, [{ fraction: (p * v.before.with) / Math.max(1, v.before.without), color: T.saved }])} />
+              <Text> {full(Math.round(v.before.with * p))} (live)</Text>
+            </Box>
+          )}
+          {v.before && (
+            <Text color="#3987e5">
+              {''.padEnd(LABEL)}
+              {full(v.before.without - v.before.with)} fewer tokens ({pct(v.before.without - v.before.with, v.before.without)} smaller)
+            </Text>
+          )}
+          <Text> </Text>
+          <Text dimColor>PER TOOL, TOKENS PER REQUEST</Text>
+          {v.tools.map(t => (
+            <Box flexDirection="row">
+              {label(t.name)}
+              <Raster key={`tool-${t.name}`} {...barRaster(barW, [{ fraction: (p * t.tokens) / maxTool, color: t.isLoaded ? T.loaded : T.saved }])} />
+              <Text> {full(t.tokens)} </Text>
+              <Text dimColor>
+                {sourceTag(t.source)}
+                {t.isLoaded ? ' · loaded' : ''}
+              </Text>
+            </Box>
+          ))}
+          {v.notCounted.length > 0 && <Text dimColor>Not counted (Claude Code defers them anyway): {v.notCounted.join(', ')}</Text>}
+          <Text> </Text>
+          <Text dimColor>
+            THIS CONVERSATION · {v.session.requests} REQUEST{v.session.requests === 1 ? '' : 'S'}
+          </Text>
+          <Box flexDirection="row">
+            {label('Net saved, all requests')}
+            <Raster
+              key="session"
+              {...barRaster(barW, [
+                // The cost gets at least half a cell so it shows; the net gives up that much.
+                { fraction: Math.max(0, (p * Math.max(0, v.session.net)) / total - costBump), color: T.saved },
+                { fraction: costShare + costBump, color: T.cost },
+              ])}
+            />
+            <Text> {full(Math.round(v.session.net * p))} net</Text>
+          </Box>
+          <Box flexDirection="row">
+            <Text>{''.padEnd(LABEL)}</Text>
+            <Text color="#3987e5">■</Text>
+            <Text dimColor> net  </Text>
+            <Text color="#d95926">■</Text>
+            <Text dimColor>
+              {' '}taken back {full(v.session.overhead)} ({pct(v.session.overhead, v.session.notSent)})
+            </Text>
+          </Box>
+          <Text>
+            {'ToolSearch  '}
+            <Text bold>{Math.round(v.session.hops * p)}</Text>
+            {` hop${v.session.hops === 1 ? '' : 's'} (~${full(v.session.hopTokens)} est.)  ·  `}
+            <Text bold>{Math.round(v.session.empty * p)}</Text>
+            {` empty (~${full(v.session.emptyTokens)} est.)  ·  `}
+            <Text bold>{Math.round(v.session.extra * p)}</Text>
+            {` extra request${v.session.extra === 1 ? '' : 's'} (${full(v.session.extraOut)} out, live)`}
+          </Text>
+          <Text> </Text>
+          <Text dimColor>live = API usage · table = README (2.1.318) · CC est. = Claude Code's estimate · rough = text ÷ 4</Text>
+          {buttons}
+        </Box>
+      )
+    }
+
+    // Desktop, VS Code and mobile: one SVG with its own animation.
+    const { Box, Button, Svg } = $.ui.resolve(e) as ElementTable<'desktop'>
+    let animate = false
+    try {
+      animate = (await $.clock.now()) - (await read($, playedAt)) < 2000
+    } catch {
+      animate = false
+    }
+    const totals = await readTotals($)
     return (
       <Box flexDirection="column">
-        {lines.map((line, i) =>
-          line === '' ? <Text> </Text> : i === 0 ? <Text bold>{line}</Text> : <Text>{line}</Text>,
-        )}
-        <Text> </Text>
-        <Text dimColor>
-          live = from this session's API usage. README table = measured with --disallowedTools on Claude Code 2.1.318. Estimates count about 4 characters per token.
-        </Text>
-        <Box>
+        <Svg source={svgPanel(v, { animate })} alt={reportLines(s, totals).join('\n')} isInteractive />
+        <Box flexDirection="row">
+          <Button key="replay" label="Replay" onPress={() => play($).catch(() => undefined)} />
           <Button key="refresh" label="Refresh estimates" onPress={() => readEngineEstimates($).catch(() => undefined)} />
         </Box>
       </Box>

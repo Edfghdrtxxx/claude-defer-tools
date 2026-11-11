@@ -80,20 +80,30 @@ printf '%s' '{"keepInFront":"Workflow"}' | claude plugin configure defer-tools@d
 
 Since 0.2.0 the mod shows its savings while you work, in the CLI and in the desktop app.
 
-- **Status line**, under the prompt: `defer-tools: saves 16k tokens per request · 1 ToolSearch hop, 0 empty searches`. Turn it off with the `statusLine` option.
-- **Pane**, opened with `/defer-savings`: the full count for the current conversation. Where no pane can be drawn, the command answers with the same report as text.
+- **Status line**, under the prompt: `defer-tools: ▼ 15k tokens saved per request · 1 ToolSearch hop, 1 empty search`. The number counts up when it changes. Turn it off with the `statusLine` option.
+- **Pane**, opened with `/defer-savings`: charts for the current conversation, which animate when the pane opens (press Replay to see it again). In the desktop app, VS Code and mobile it is an SVG chart with hover tooltips; in the terminal it is drawn with coloured block characters. Where no pane can be drawn, the command answers with the same numbers as text.
 
-![The /defer-savings pane, drawn from an automated test with test data](docs/screenshots/pane-desktop.png)
+Desktop app (SVG pane, follows the light or dark theme):
 
-The picture is drawn from `tests/screenshots.test.tsx` with test data, not taken from a real session; `claude plugin test . | python3 scripts/render-screenshots.py` draws it again.
+![The /defer-savings pane in the desktop app: a count-up number, before and after bars, a bar per tool and the ToolSearch costs, drawn from an automated test with test data](docs/screenshots/pane-desktop-dark.gif)
+
+Terminal (CLI):
+
+![The /defer-savings pane in the terminal, drawn from an automated test with test data](docs/screenshots/pane-terminal-cli.gif)
+
+![The status line counting up, drawn from an automated test with test data](docs/screenshots/status-line-cli.gif)
+
+These pictures are drawn from `tests/screenshots.test.tsx` with test data, not taken from a real session: the terminal ones from the element tree the mod returned for each frame, the desktop ones from the SVG it returned (`docs/screenshots/pane-svg-desktop.svg` is that SVG, and plays in a browser). `claude plugin test . | python3 scripts/render-screenshots.py` draws them again (needs Pillow and CairoSVG).
 
 The pane shows:
 
-- Saved per request now, net: the schemas not sent, minus the system-prompt line the mod adds.
-- The first request of the conversation as the API reported it, and about what it would have been without the mod.
-- Each deferred tool with its tokens, where that figure comes from, and whether ToolSearch has loaded it. A loaded tool's schema rides in the conversation from then on, so it stops counting as saved.
-- ToolSearch: hops (searches that loaded one of the mod's tools), empty searches (searches that found nothing), and the extra model requests whose only tool calls were ToolSearch.
-- This conversation's totals, and a total over the sessions on this computer.
+- A big number: tokens saved per request now, net (the schemas not sent, minus the system-prompt line the mod adds).
+- Two bars for the first request of the conversation: as the API reported it, and about what it would have been without the mod.
+- A bar per deferred tool with its tokens and where that figure comes from. A tool ToolSearch has loaded is drawn dashed grey: its schema rides in the conversation from then on, so it stops counting as saved.
+- One bar for this conversation: the net saved in blue, and what the prompt line and ToolSearch took back in orange.
+- Three counts for ToolSearch: hops (searches that loaded one of the mod's tools), empty searches (searches that found nothing), and the extra model requests whose only tool calls were ToolSearch.
+
+The text version of the pane (read by screen readers, and the command's answer where no pane is drawn) also gives a total over the sessions on this computer.
 
 Every number says where it comes from, so the display does not overstate:
 
