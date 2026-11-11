@@ -86,9 +86,10 @@ const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n =
 
 /** The one status-line entry. */
 /** `full` adds the ToolSearch counts; `number` is the figure alone. */
+/** No name in front: the desktop app already labels the line with the plugin's name. */
 export const statusLine = (s: DeferToolsSavings, shown = netNow(s), mode: 'full' | 'number' = 'full'): string | undefined => {
   if (!s.tools.some(t => t.wasInFront)) return undefined
-  const parts = [`defer-tools: ▼ ${short(Math.round(shown))} tokens saved per request`]
+  const parts = [`▼ ${short(Math.round(shown))} tokens saved per request`]
   if (mode === 'full' && (s.hops > 0 || s.emptySearches > 0))
     parts.push(`${plural(s.hops, 'ToolSearch hop')}, ${plural(s.emptySearches, 'empty search', 'empty searches')}`)
   return parts.join(' · ')

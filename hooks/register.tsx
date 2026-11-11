@@ -32,7 +32,7 @@ import {
 } from './settings'
 import type { ChartId } from './settings'
 import { aboutTool, placementWords, toolOfFocus } from './about'
-import { FRAMES, FRAME_MS, barRaster, bigNumber, ease, pct, sourceTag, svgPanel, T, visualOf } from './visual'
+import { FRAMES, FRAME_MS, barRaster, bigNumber, ease, pct, sourceTag, svgPanel, svgSize, T, visualOf, chartName } from './visual'
 
 // Tools whose full schema is sent with every request although most sessions never call them.
 // Each is listed behind ToolSearch instead: it stays available, and its schema loads when the
@@ -451,6 +451,7 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: COMMAND }, async $ => {
     await update($, view, () => 'charts' as const)
+    redraw($)
     const opened = await $.ui.open({ id: PANE, title: 'Token savings' })
     if (opened.isPlaced) {
       await play($).catch(() => undefined)
@@ -469,6 +470,7 @@ export const register: Register = (on, options) => {
       return { text: done.text }
     }
     await update($, view, () => 'settings' as const)
+    redraw($)
     // With the keys, Tab and the arrows walk the rows and each row says what its tool does.
     const opened = await $.ui.open({ id: PANE, title: 'defer-tools settings', focus: true })
     if (opened.isPlaced) return { text: 'Opened the defer-tools settings.' }
@@ -529,7 +531,7 @@ export const register: Register = (on, options) => {
                   onPress={() => editSettings($, x => toggleTool(x, t.name, isDeferred)).catch(() => undefined)}
                 />
                 <Box width={NAME} marginLeft={1}>
-                  <Text hover={{ bold: true, color: 'suggestion' }}>{t.name}</Text>
+                  <Text hover={{ bold: true, color: 'suggestion' }}>{chartName(t.name, NAME - 1)}</Text>
                 </Box>
                 <Box width={8} justifyContent="flex-end">
                   <Text>{full(t.tokens)}</Text>
@@ -693,7 +695,7 @@ export const register: Register = (on, options) => {
           <Text dimColor>PER TOOL, TOKENS PER REQUEST</Text>,
           ...v.tools.flatMap(t => [
             <Box flexDirection="row">
-              {label(t.name)}
+              {label(chartName(t.name, LABEL - 1))}
               <Raster key={`tool-${t.name}`} {...barRaster(barW, [{ fraction: (p * t.tokens) / maxTool, color: t.isLoaded ? T.loaded : T.saved }])} />
               <Text> {full(t.tokens)} </Text>
               <Text dimColor>
@@ -772,9 +774,11 @@ export const register: Register = (on, options) => {
       isPlaying = false
     }
     const totals = await readTotals($)
+    const source = svgPanel(v, { animate: isPlaying, charts: settings.charts })
+    const { width, height } = svgSize(source)
     return (
       <Box flexDirection="column">
-        <Svg source={svgPanel(v, { animate: isPlaying, charts: settings.charts })} alt={reportLines(s, totals).join('\n')} isInteractive />
+        <Svg source={source} width={width} height={height} alt={reportLines(s, totals).join('\n')} isInteractive />
         <Box flexDirection="row">
           <Button key="replay" label="Replay" onPress={() => play($).catch(() => undefined)} />
           <Button key="refresh" label="Refresh estimates" onPress={() => readEngineEstimates($).catch(() => undefined)} />
@@ -785,14 +789,29 @@ export const register: Register = (on, options) => {
   })
 }
 
+/**
+ * Asks for the pane again after the view changes. Reading `view` while drawing should be enough,
+ * but in a desktop session whose plugin was updated while the pane was open, /defer-settings
+ * left the charts on screen under the settings title.
+ */
+function redraw($: EngineInterface): void {
+  try {
+    $.ui.invalidate('ui.render')
+  } catch {
+    // An engine without it draws on the next change anyway.
+  }
+}
+
 async function showSettings($: EngineInterface): Promise<void> {
   settingsLoaded = loadSettings($)
   await settingsLoaded
   await update($, view, () => 'settings' as const)
+  redraw($)
 }
 
 async function showCharts($: EngineInterface): Promise<void> {
   await update($, view, () => 'charts' as const)
+  redraw($)
   await play($)
 }
 

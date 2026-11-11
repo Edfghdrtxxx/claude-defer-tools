@@ -50,9 +50,9 @@ test('counts what it defers, a hop, an empty search and the requests, on every s
   await $.tool.describe({ tool: 'Workflow', description: 'w', provider: ENGINE })
   await $.tool.describe({ tool: 'mcp__visualize__read_me', description: 'x'.repeat(400), isDeferred: true, provider: ENGINE })
   await clock.advance(1000)
-  expect(statuses.at(-1)).toBe('defer-tools: ▼ 15k tokens saved per request')
+  expect(statuses.at(-1)).toBe('▼ 15k tokens saved per request')
   // It counted up to that figure.
-  expect(statuses.filter(t => t?.startsWith('defer-tools: ▼')).length).toBeGreaterThan(3)
+  expect(statuses.filter(t => t?.startsWith('▼ ')).length).toBeGreaterThan(3)
 
   // First request: one ToolSearch call only, so it is an extra round trip.
   toolUses = [{ name: 'ToolSearch', input: { query: 'select:Workflow' } }]
@@ -74,7 +74,7 @@ test('counts what it defers, a hop, an empty search and the requests, on every s
 
   // Workflow is loaded now, so only Artifact still saves.
   await clock.advance(1000)
-  expect(statuses.at(-1)).toBe('defer-tools: ▼ 13k tokens saved per request · 1 ToolSearch hop, 1 empty search')
+  expect(statuses.at(-1)).toBe('▼ 13k tokens saved per request · 1 ToolSearch hop, 1 empty search')
 
   // Terminal: big digits and bars, every number also in text.
   const term = await $.ui.mount({ ...PANE, surface: 'terminal' })

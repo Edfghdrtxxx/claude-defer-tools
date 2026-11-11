@@ -1,6 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { ABOUT, aboutTool, firstSentence, toolOfFocus } from '../hooks/about'
+import { chartName, NAME_CHARS } from '../hooks/visual'
 
 const ENGINE = { plugin: 'engine', tier: 'core' } as const
 const MCP = { plugin: 'github', tier: 'mcp' } as never
@@ -117,6 +118,17 @@ test('charts: a hover card on the desktop, a button for notes in the terminal', 
   expect(svg).toContain('Publishes web pages, slide decks and documents')
   expect(svg).toContain('Hidden behind ToolSearch: saved on every request')
   expect((await desk.find({ type: 'Svg' }))?.props.isInteractive).toBe(true)
+  // The desktop frame has no size of its own: the element carries the chart's, read from its root.
+  const props = (await desk.find({ type: 'Svg' }))?.props
+  const root = /<svg\b[^>]*>/.exec(svg)?.[0] ?? ''
+  expect(props?.width).toBe(680)
+  expect(props?.height).toBe(Number(/\sheight="([\d.]+)"/.exec(root)?.[1]))
+  expect(props?.height).toBeGreaterThan(300)
+  expect(root).toContain('preserveAspectRatio="xMidYMin meet"')
+  // Every tool label is cut at the bars.
+  expect(svg).toContain('<clipPath id="names">')
+  expect(svg).toContain('class="t2 name" x="16" y="')
+  expect((svg.match(/class="t2 name"[^>]*clip-path="url\(#names\)"/g) ?? []).length).toBe((svg.match(/class="t2 name"/g) ?? []).length)
   await desk.unmount()
 
   const term = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -125,4 +137,14 @@ test('charts: a hover card on the desktop, a button for notes in the terminal', 
   expect(await term.find({ type: 'Text', text: /Runs a script that sends many helper agents/ })).toBeDefined()
   expect((await term.find({ type: 'Button', key: 'explain' }))?.props.label).toBe('Hide tool notes')
   await term.unmount()
+})
+
+test('chart labels fit before the bars and keep what tells MCP tools apart', () => {
+  const docs = ['batch', 'guide', 'update'].map(t => `mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__${t}`)
+  const labels = [...docs, 'mcp__ccd_session__read_widget_context', 'mcp__visualize__read_me'].map(n => chartName(n))
+  for (const l of labels) expect(l.length).toBeLessThanOrEqual(NAME_CHARS)
+  expect(new Set(labels).size).toBe(labels.length)
+  expect(labels[0]).toBe('batch · 1a59c906-04da-5…')
+  expect(labels[4]).toBe('read_me · visualize')
+  expect(chartName('Artifact')).toBe('Artifact')
 })

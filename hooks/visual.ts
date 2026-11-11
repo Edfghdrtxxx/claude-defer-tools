@@ -138,6 +138,31 @@ export const wrapWords = (text: string, width: number): string[] => {
   return lines
 }
 
+/** Characters that fit before the bars at 13px, digits and hyphens included (about 7.4px each). */
+export const NAME_CHARS = 24
+
+/**
+ * A tool's name as the chart's label column can hold it. An MCP tool keeps its own name first and
+ * its connector after, since names like `mcp__1a59c906-…__batch` differ only at the end.
+ * The hover card shows the full name.
+ */
+export const chartName = (name: string, max = NAME_CHARS): string => {
+  const m = /^mcp__(.+?)__(.+)$/.exec(name)
+  const label = m ? `${m[2]} · ${m[1]}` : name
+  return label.length > max ? `${label.slice(0, max - 1)}…` : label
+}
+
+/**
+ * The width and height on a chart's root `<svg>`, for the `Svg` element's props. The desktop app
+ * draws an interactive Svg in a frame that has no size of its own (2.1.321): without these props
+ * the frame is 150 pixels tall and the chart shrinks to fit it.
+ */
+export const svgSize = (svg: string): { width: number; height: number } => {
+  const root = /<svg\b[^>]*>/.exec(svg)?.[0] ?? ''
+  const read = (name: string): number => Number(new RegExp(`\\s${name}="([\\d.]+)"`).exec(root)?.[1] ?? 0)
+  return { width: read('width'), height: read('height') }
+}
+
 export const svgPanel = (v: Visual, o: SvgOptions): string => {
   const W = 680
   const p = o.animate ? 1 : ease(o.progress ?? 1)
@@ -241,14 +266,14 @@ export const svgPanel = (v: Visual, o: SvgOptions): string => {
         const maxTool = Math.max(1, ...v.tools.map(t => t.tokens))
         v.tools.forEach((t, i) => {
           const id = `tool${i}`
-          const name = t.name.length > 28 ? `${t.name.slice(0, 27)}…` : t.name
+          const name = chartName(t.name)
           const cls = t.isLoaded ? 'loaded' : 'saved'
           const state = t.isLoaded
             ? 'Loaded by ToolSearch in this conversation, so no longer saved'
             : 'Hidden behind ToolSearch: saved on every request'
           // The whole row is the hover target: a faint band behind it lights up.
           parts.push(`<g class="row" id="${id}"><rect class="hit" x="${LABEL_X - 6}" y="${y - 1}" width="${W - 2 * LABEL_X + 12}" height="20" rx="4"/>`)
-          parts.push(`<text class="t2 name" x="${LABEL_X}" y="${y + 13}">${esc(name)}</text>`)
+          parts.push(`<text class="t2 name" x="${LABEL_X}" y="${y + 13}" clip-path="url(#names)">${esc(name)}</text>`)
           parts.push(bar(BAR_X, y + 2, Math.max(3, (BAR_W * t.tokens) / maxTool), 14, cls, ''))
           parts.push(
             `<text class="value" x="${VALUE_X}" y="${y + 14}">${full(t.tokens)}<tspan class="tag"> ${SOURCE_TAG[t.source]}${t.isLoaded ? ' · loaded' : ''}</tspan></text></g>`,
@@ -367,8 +392,11 @@ export const svgPanel = (v: Visual, o: SvgOptions): string => {
         ? css(DARK)
         : `${css(DARK)}@media (prefers-color-scheme: light){${css(LIGHT)}}`)
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${y}" viewBox="0 0 ${W} ${y}" font-family="system-ui, -apple-system, 'Segoe UI', 'DejaVu Sans', sans-serif">` +
+    // A frame narrower than W shrinks the chart to its width: keep it at the top, the spare room below.
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${y}" viewBox="0 0 ${W} ${y}" preserveAspectRatio="xMidYMin meet" font-family="system-ui, -apple-system, 'Segoe UI', 'DejaVu Sans', sans-serif">` +
     `<style>${style}</style>` +
+    // A label that is still too wide is cut at the bars instead of running under them.
+    `<defs><clipPath id="names"><rect x="0" y="0" width="${BAR_X - 8}" height="${y}"/></clipPath></defs>` +
     (o.theme ? `<rect class="bg" width="${W}" height="${y}"/>` : '') +
     parts.join('') +
     `</svg>`

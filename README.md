@@ -82,12 +82,16 @@ printf '%s' '{"keepInFront":"Workflow"}' | claude plugin configure defer-tools@d
 
 Since 0.2.0 the mod shows its savings while you work, in the CLI and in the desktop app.
 
-- **Status line**, under the prompt: `defer-tools: ▼ 15k tokens saved per request · 1 ToolSearch hop, 1 empty search`. The number counts up when it changes. Turn it off, or show the number alone, with `/defer-settings`.
+- **Status line**, under the prompt: `▼ 15k tokens saved per request · 1 ToolSearch hop, 1 empty search`. The number counts up when it changes. Turn it off, or show the number alone, with `/defer-settings`.
 - **Pane**, opened with `/defer-savings`: charts for the current conversation, which animate when the pane opens (press Replay to see it again). In the desktop app, VS Code and mobile it is an SVG chart with hover tooltips; in the terminal it is drawn with coloured block characters. Where no pane can be drawn, the command answers with the same numbers as text.
 
 Desktop app (SVG pane, follows the light or dark theme):
 
-![The /defer-savings pane in the desktop app: a count-up number, before and after bars, a bar per tool and the ToolSearch costs, drawn from an automated test with test data](docs/screenshots/pane-desktop-dark.gif)
+| Dark | Light |
+| --- | --- |
+| ![The /defer-savings pane in the desktop app, dark theme: a count-up number, before and after bars, a bar per tool and the ToolSearch costs, drawn from an automated test with test data](docs/screenshots/pane-desktop-dark.gif) | ![The same pane in the light theme, drawn from an automated test with test data](docs/screenshots/pane-desktop-light.gif) |
+
+A tool from an MCP connector is labelled with its own name first and its connector after, for example `batch · 4f0c2a7e-9b1d-4…` for `mcp__4f0c2a7e-…__batch`, so tools of one connector stay apart when the connector's name is a long id. A label that is still too long is cut short before the bars; pointing at the tool shows its full name.
 
 Terminal (CLI):
 
@@ -95,7 +99,7 @@ Terminal (CLI):
 
 ![The status line counting up, drawn from an automated test with test data](docs/screenshots/status-line-cli.gif)
 
-These pictures are drawn from `tests/screenshots.test.tsx` with test data, not taken from a real session: the terminal ones from the element tree the mod returned for each frame, the desktop ones from the SVG it returned (`docs/screenshots/pane-svg-desktop.svg` is that SVG, and plays in a browser). `claude plugin test . | python3 scripts/render-screenshots.py` draws them again (needs Pillow and CairoSVG).
+These pictures are drawn from `tests/screenshots.test.tsx` with test data, not taken from a real session: the terminal ones from the element tree the mod returned for each frame, the desktop ones from the SVG it returned (`docs/screenshots/pane-svg-desktop.svg` is that SVG, and plays in a browser). `claude plugin test . | python3 scripts/render-screenshots.py` draws them again. It needs Pillow, the DejaVu Sans, DejaVu Sans Mono and Inter fonts (on macOS, set `SCREENSHOT_FONTS` to a folder that holds them), and CairoSVG or Google Chrome; without a working CairoSVG it draws the SVGs with headless Chrome, which draws them as the desktop app does.
 
 The pane shows:
 
@@ -195,7 +199,9 @@ Terminal, keyboard focus on a tool:
 - The first call of a deferred tool in a session takes one extra ToolSearch step.
 - The added line costs about 130 tokens in the CLI and about 290 in the desktop app.
 - The mod uses the mods API (`tool.describe`, `prompt.compose`, and for the display and settings `turn.step`, `tool.call`, `$.session.usage`, `$.ui.status`, `$.fs`, `ui.focus`, a pane with hover) of the builds above; a later build may change it.
-- The savings display and the settings were tested with `claude plugin test` on Claude Code 2.1.322 (`tests/savings.test.tsx`, `tests/settings.test.tsx`, `tests/about.test.tsx`), not yet in a live CLI or desktop session. The test kit cannot press Tab, so the terminal's focus line is checked only up to naming the focused row.
+- The savings display and the settings were tested with `claude plugin test` on Claude Code 2.1.322 (`tests/savings.test.tsx`, `tests/settings.test.tsx`, `tests/about.test.tsx`). The test kit cannot press Tab, so the terminal's focus line is checked only up to naming the focused row.
+- In a live desktop session (desktop app with Claude Code 2.1.321), 0.4.1 drew the pane at full width and the status line as `defer-tools ▼ 19k tokens saved per request`; the app puts the plugin's name in front. 0.4.0 drew the pane's chart 150 pixels tall there, since the app gives the chart's frame no size of its own; 0.4.1 passes the chart's size.
+- After `claude plugin update` in a running desktop session, the open pane kept showing the charts under the title of `/defer-settings`, and its buttons did nothing (the app logged `ui_press not handled`). Close the pane and start a new session after an update. 0.4.2 also asks for a redraw when the view changes.
 - Some MCP connectors expect their tools to stay in front. The Claude Docs connector's own help says its `batch`, `guide` and `update` tools are "always listed"; deferring them worked in the test above, but if a connector misbehaves, put its tools in `keepInFront` or leave them out of `alsoDefer`.
 
 ## Uninstall
