@@ -48,6 +48,12 @@ const DESKTOP: Scenario = {
     { tool: 'mcp__visualize__read_me', description: 'Setup notes for widgets.' },
     { tool: 'mcp__visualize__show_widget', description: 'Show an inline widget.' },
     { tool: 'mcp__ccd_session__read_widget_context', description: 'Read widget state.', isDeferred: true },
+    // Tools the mod leaves alone by default: they show in the settings' tool picker.
+    { tool: 'Bash', description: 'Executes a bash command and returns its output. '.repeat(60) },
+    { tool: 'Read', description: 'Reads a file from the local filesystem. '.repeat(30) },
+    { tool: 'Edit', description: 'Performs exact string replacement in a file. '.repeat(24) },
+    { tool: 'Grep', description: 'Content search built on ripgrep. '.repeat(30) },
+    { tool: 'WebFetch', description: 'Fetches a web page and answers a question about it. '.repeat(12) },
   ],
   mcpEstimates: [
     { name: 'mcp__visualize__read_me', tokens: 412 },
@@ -71,6 +77,17 @@ for (const scenario of [CLI, DESKTOP]) {
       return { value: undefined }
     })
     on('store.get', () => ({ value: undefined }))
+    // The settings file, kept in memory.
+    const files = new Map<string, string>()
+    on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/you' : undefined }))
+    on('fs.exists', (_, e) => ({ value: files.has(e.path) }))
+    on('fs.read', (_, e) => ({ value: files.get(e.path) ?? '' }))
+    on('fs.write', (_, e) => {
+      files.set(e.path, e.text)
+      return { value: undefined }
+    })
+    on('ui.invalidate', () => ({ value: undefined }))
+    on('ui.open', () => ({ value: { isPlaced: true } }) as never)
     on('store.set', () => ({ value: undefined }))
     on('session.id', () => ({ value: 's' }))
     on('session.usage', () => ({
@@ -155,6 +172,33 @@ for (const scenario of [CLI, DESKTOP]) {
     await desk.unmount()
     const v = visualOf(latest!)
     console.log(`SVG ${JSON.stringify({ scenario: scenario.name, animated: svg?.props.source, alt: svg?.props.alt })}`)
+    // The settings view, step by step: open it, then change a few things.
+    if (scenario.name === 'desktop') {
+      await $.command.run({ command: 'defer-settings', args: '', origin: { kind: 'composer' } as never, presentation: { layout: 'main', columns: 100 } as never })
+      type Acts = { press: (t: { key: string }) => Promise<unknown>; select: (t: { key: string; value: string }) => Promise<unknown> }
+      const steps: [string, (ui: Acts) => Promise<unknown>][] = [
+        ['Opened with /defer-settings', async () => undefined],
+        ['Workflow: keep it loaded', ui => ui.press({ key: 'tool:Workflow' })],
+        ['Bash: hide it behind ToolSearch', ui => ui.press({ key: 'tool:Bash' })],
+        ['Hide the first-request chart', ui => ui.press({ key: 'chart:firstRequest' })],
+        ['Move the per-tool chart up', ui => ui.press({ key: 'up:perTool' })],
+        ['Status line: number only', ui => ui.select({ key: 'status', value: 'number' })],
+      ]
+      for (const surface of ['terminal', 'desktop'] as const) {
+        // Each surface starts from the defaults.
+        files.clear()
+        await $.command.run({ command: 'defer-settings', args: '', origin: { kind: 'composer' } as never, presentation: { layout: 'main', columns: 100 } as never })
+        const ui = await $.ui.mount({ ...PANE, surface })
+        let i = 0
+        for (const [caption, act] of steps) {
+          await act(ui)
+          const root = await ui.find({ type: 'Box' })
+          console.log(`SETTINGS ${JSON.stringify({ scenario: scenario.name, surface, step: i++, caption, tree: root })}`)
+        }
+        await ui.unmount()
+      }
+    }
+
     for (let f = 0; f <= 30; f++) {
       for (const theme of ['dark', 'light'] as const)
         console.log(`SVGFRAME ${JSON.stringify({ scenario: scenario.name, theme, frame: f, svg: svgPanel(v, { animate: false, progress: f / 30, theme }) })}`)

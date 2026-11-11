@@ -1,5 +1,7 @@
 // The savings drawn as figures: an SVG for the desktop app, VS Code and mobile (animated with
 // SMIL), and coloured cells for the terminal (animated frame by frame by the hooks module).
+import { CHARTS } from './settings'
+import type { ChartId } from './settings'
 import type { DeferToolsSavings, DeferToolsSource } from '../types'
 import { bySource, full, netNow, netSession, savedAtStart, savedNow } from './savings'
 
@@ -97,7 +99,8 @@ const SOURCE_TAG: Record<DeferToolsSource, string> = { table: 'table', engine: '
 /** Ease-out: fast start, gentle stop. */
 export const ease = (t: number): number => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3
 
-const pct = (part: number, whole: number): string => (whole > 0 ? `${((100 * part) / whole).toFixed(part / whole < 0.1 ? 1 : 0)}%` : '0%')
+const pct = (part: number, whole: number): string =>
+  whole > 0 ? `${((100 * part) / whole).toFixed(part / whole < 0.1 ? 1 : 0)}%` : '0%'
 
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
@@ -111,6 +114,8 @@ export type SvgOptions = {
   progress?: number
   /** Fixed colours for a still picture rendered outside an app; absent, follows the app's scheme. */
   theme?: 'dark' | 'light'
+  /** The charts to draw, in order; absent, all of them. */
+  charts?: readonly ChartId[]
 }
 
 export const svgPanel = (v: Visual, o: SvgOptions): string => {
@@ -129,15 +134,17 @@ export const svgPanel = (v: Visual, o: SvgOptions): string => {
     const width = Math.max(0, w)
     const delay = (0.08 * barIndex++).toFixed(2)
     const shown = o.animate ? width : width * p
-    const anim = o.animate && width > 0
-      ? `<animate attributeName="width" from="0" to="${width.toFixed(1)}" begin="${delay}s" dur="0.9s" fill="freeze" calcMode="spline" keyTimes="0;1" keySplines="0.2 0.8 0.2 1"/><set attributeName="width" to="0" begin="0s" dur="${delay}s"/>`
-      : ''
+    const anim =
+      o.animate && width > 0
+        ? `<animate attributeName="width" from="0" to="${width.toFixed(1)}" begin="${delay}s" dur="0.9s" fill="freeze" calcMode="spline" keyTimes="0;1" keySplines="0.2 0.8 0.2 1"/><set attributeName="width" to="0" begin="0s" dur="${delay}s"/>`
+        : ''
     return `<rect class="${cls}" x="${x}" y="${yy}" width="${shown.toFixed(1)}" height="${h}" rx="${Math.min(4, h / 2)}"><title>${esc(title)}</title>${anim}</rect>`
   }
 
   // A number that counts up from zero.
   const counter = (x: number, yy: number, value: number, cls: string, anchor = 'start'): string => {
-    if (!o.animate) return `<text class="${cls}" x="${x}" y="${yy}" text-anchor="${anchor}">${full(Math.round(value * p))}</text>`
+    if (!o.animate)
+      return `<text class="${cls}" x="${x}" y="${yy}" text-anchor="${anchor}">${full(Math.round(value * p))}</text>`
     const steps = 20
     const frames: string[] = []
     for (let i = 0; i < steps; i++) {
@@ -161,93 +168,137 @@ export const svgPanel = (v: Visual, o: SvgOptions): string => {
 
   if (v.isEmpty) {
     y = 40
-    parts.push(`<text class="t2" x="${LABEL_X}" y="${y}">No tool from the list was in front in this session, so nothing is saved here yet.</text>`)
+    parts.push(
+      `<text class="t2" x="${LABEL_X}" y="${y}">No tool from the list was in front in this session, so nothing is saved here yet.</text>`,
+    )
     y += 20
   } else {
-    // Hero: tokens saved per request, net.
-    y = 26
-    parts.push(`<text class="eyebrow" x="${LABEL_X}" y="${y}">TOKENS SAVED ON EVERY REQUEST (NET)</text>`)
-    y += 56
-    parts.push(counter(LABEL_X, y, v.net, 'hero'))
-    y += 22
-    const src = (['table', 'engine', 'rough'] as const)
-      .filter(k => v.sources[k] > 0)
-      .map(k => `${full(v.sources[k])} ${SOURCE_TAG[k]}`)
-      .join(' · ')
-    parts.push(`<text class="small" x="${LABEL_X}" y="${y}">${full(v.schemas)} schema tokens (${esc(src)}) minus ${full(v.note)} for the prompt line (est.)</text>`)
+    const draw: Record<ChartId, () => void> = {
+      // Hero: tokens saved per request, net.
+      hero: () => {
+        y += y === 0 ? 26 : 40
+        parts.push(`<text class="eyebrow" x="${LABEL_X}" y="${y}">TOKENS SAVED ON EVERY REQUEST (NET)</text>`)
+        y += 56
+        parts.push(counter(LABEL_X, y, v.net, 'hero'))
+        y += 22
+        const src = (['table', 'engine', 'rough'] as const)
+          .filter(k => v.sources[k] > 0)
+          .map(k => `${full(v.sources[k])} ${SOURCE_TAG[k]}`)
+          .join(' · ')
+        parts.push(
+          `<text class="small" x="${LABEL_X}" y="${y}">${full(v.schemas)} schema tokens (${esc(src)}) minus ${full(v.note)} for the prompt line (est.)</text>`,
+        )
+      },
+      // Before and after: the first request.
+      firstRequest: () => {
+        if (v.before) {
+          section('FIRST REQUEST OF THIS CONVERSATION')
+          const max = Math.max(v.before.without, v.before.with, 1)
+          const rows: [string, number, string, string][] = [
+            ['Without defer-tools', v.before.without, 'without', 'about (live + saved)'],
+            ['With defer-tools', v.before.with, 'saved', 'live'],
+          ]
+          for (const [label, value, cls, how] of rows) {
+            parts.push(`<text class="t2" x="${LABEL_X}" y="${y + 15}">${label}</text>`)
+            parts.push(bar(BAR_X, y + 2, (BAR_W * value) / max, 18, cls, `${label}: ${full(value)} tokens (${how})`))
+            parts.push(counter(VALUE_X, y + 16, value, 'value'))
+            y += 26
+          }
+          const cut = v.before.without - v.before.with
+          parts.push(
+            `<text class="delta" x="${BAR_X}" y="${y + 10}">${full(cut)} fewer tokens (${pct(cut, v.before.without)} smaller)</text>`,
+          )
+          y += 14
+        }
+      },
+      // Per tool.
+      perTool: () => {
+        section('PER TOOL, TOKENS PER REQUEST')
+        const maxTool = Math.max(1, ...v.tools.map(t => t.tokens))
+        for (const t of v.tools) {
+          const name = t.name.length > 28 ? `${t.name.slice(0, 27)}…` : t.name
+          parts.push(`<text class="t2" x="${LABEL_X}" y="${y + 13}">${esc(name)}</text>`)
+          const cls = t.isLoaded ? 'loaded' : 'saved'
+          const state = t.isLoaded ? 'loaded by ToolSearch, no longer saved' : 'not loaded, saved on every request'
+          parts.push(
+            bar(
+              BAR_X,
+              y + 2,
+              Math.max(3, (BAR_W * t.tokens) / maxTool),
+              14,
+              cls,
+              `${t.name}: ${full(t.tokens)} tokens (${SOURCE_TAG[t.source]}), ${state}`,
+            ),
+          )
+          parts.push(
+            `<text class="value" x="${VALUE_X}" y="${y + 14}">${full(t.tokens)}<tspan class="tag"> ${SOURCE_TAG[t.source]}${t.isLoaded ? ' · loaded' : ''}</tspan></text>`,
+          )
+          y += 22
+        }
+        if (v.notCounted.length > 0) {
+          parts.push(
+            `<text class="small" x="${LABEL_X}" y="${y + 8}">Not counted (Claude Code defers them anyway): ${esc(v.notCounted.join(', '))}</text>`,
+          )
+          y += 14
+        }
+      },
+      // This conversation: net against what ToolSearch took back.
+      conversation: () => {
+        section(`THIS CONVERSATION · ${v.session.requests} REQUEST${v.session.requests === 1 ? '' : 'S'}`)
+        const total = Math.max(1, v.session.notSent)
+        // The cost sits at the right end; the net grows toward it.
+        const costW = Math.max(v.session.overhead > 0 ? 3 : 0, (BAR_W * v.session.overhead) / total)
+        const netW = Math.max(0, Math.min((BAR_W * Math.max(0, v.session.net)) / total, BAR_W - costW - 2))
+        parts.push(`<text class="t2" x="${LABEL_X}" y="${y + 16}">Net saved, all requests</text>`)
+        parts.push(bar(BAR_X, y + 2, netW, 20, 'saved', `Net: ${full(v.session.net)} tokens`))
+        parts.push(
+          bar(
+            BAR_X + BAR_W - costW,
+            y + 2,
+            costW,
+            20,
+            'cost',
+            `Taken back by the prompt line and ToolSearch: ${full(v.session.overhead)} tokens`,
+          ),
+        )
+        parts.push(counter(VALUE_X, y + 17, v.session.net, 'value'))
+        y += 38
+        parts.push(
+          `<text class="small" x="${BAR_X}" y="${y}"><tspan class="key-saved">■</tspan> net ${full(v.session.net)}   <tspan class="key-cost">■</tspan> taken back ${full(v.session.overhead)} (${pct(v.session.overhead, v.session.notSent)}) of ${full(v.session.notSent)} schema tokens not sent</text>`,
+        )
+        y += 12
+      },
 
-    // Before and after: the first request.
-    if (v.before) {
-      section('FIRST REQUEST OF THIS CONVERSATION')
-      const max = Math.max(v.before.without, v.before.with, 1)
-      const rows: [string, number, string, string][] = [
-        ['Without defer-tools', v.before.without, 'without', 'about (live + saved)'],
-        ['With defer-tools', v.before.with, 'saved', 'live'],
-      ]
-      for (const [label, value, cls, how] of rows) {
-        parts.push(`<text class="t2" x="${LABEL_X}" y="${y + 15}">${label}</text>`)
-        parts.push(bar(BAR_X, y + 2, (BAR_W * value) / max, 18, cls, `${label}: ${full(value)} tokens (${how})`))
-        parts.push(counter(VALUE_X, y + 16, value, 'value'))
-        y += 26
-      }
-      const cut = v.before.without - v.before.with
-      parts.push(`<text class="delta" x="${BAR_X}" y="${y + 10}">${full(cut)} fewer tokens (${pct(cut, v.before.without)} smaller)</text>`)
-      y += 14
+      // Stat tiles: what ToolSearch cost.
+      toolSearch: () => {
+        y += 16
+        const tiles: [string, number, string][] = [
+          ['ToolSearch hops', v.session.hops, `~${full(v.session.hopTokens)} tokens (est.)`],
+          ['Empty searches', v.session.empty, `~${full(v.session.emptyTokens)} tokens (est.)`],
+          ['Extra requests', v.session.extra, `${full(v.session.extraOut)} output tokens (live)`],
+        ]
+        const tileW = (W - 2 * LABEL_X - 2 * 12) / 3
+        tiles.forEach(([label, count, sub], i) => {
+          const x = LABEL_X + i * (tileW + 12)
+          parts.push(`<rect class="tile" x="${x}" y="${y}" width="${tileW}" height="64" rx="8"/>`)
+          parts.push(`<text class="small" x="${x + 12}" y="${y + 18}">${label}</text>`)
+          parts.push(counter(x + 12, y + 44, count, 'count'))
+          parts.push(`<text class="small" x="${x + 12}" y="${y + 58}">${esc(sub)}</text>`)
+        })
+        y += 64
+      },
     }
-
-    // Per tool.
-    section('PER TOOL, TOKENS PER REQUEST')
-    const maxTool = Math.max(1, ...v.tools.map(t => t.tokens))
-    for (const t of v.tools) {
-      const name = t.name.length > 28 ? `${t.name.slice(0, 27)}…` : t.name
-      parts.push(`<text class="t2" x="${LABEL_X}" y="${y + 13}">${esc(name)}</text>`)
-      const cls = t.isLoaded ? 'loaded' : 'saved'
-      const state = t.isLoaded ? 'loaded by ToolSearch, no longer saved' : 'not loaded, saved on every request'
-      parts.push(bar(BAR_X, y + 2, Math.max(3, (BAR_W * t.tokens) / maxTool), 14, cls, `${t.name}: ${full(t.tokens)} tokens (${SOURCE_TAG[t.source]}), ${state}`))
-      parts.push(`<text class="value" x="${VALUE_X}" y="${y + 14}">${full(t.tokens)}<tspan class="tag"> ${SOURCE_TAG[t.source]}${t.isLoaded ? ' · loaded' : ''}</tspan></text>`)
-      y += 22
-    }
-    if (v.notCounted.length > 0) {
-      parts.push(`<text class="small" x="${LABEL_X}" y="${y + 8}">Not counted (Claude Code defers them anyway): ${esc(v.notCounted.join(', '))}</text>`)
-      y += 14
-    }
-
-    // This conversation: net against what ToolSearch took back.
-    section(`THIS CONVERSATION · ${v.session.requests} REQUEST${v.session.requests === 1 ? '' : 'S'}`)
-    const total = Math.max(1, v.session.notSent)
-    // The cost sits at the right end; the net grows toward it.
-    const costW = Math.max(v.session.overhead > 0 ? 3 : 0, (BAR_W * v.session.overhead) / total)
-    const netW = Math.max(0, Math.min((BAR_W * Math.max(0, v.session.net)) / total, BAR_W - costW - 2))
-    parts.push(`<text class="t2" x="${LABEL_X}" y="${y + 16}">Net saved, all requests</text>`)
-    parts.push(bar(BAR_X, y + 2, netW, 20, 'saved', `Net: ${full(v.session.net)} tokens`))
-    parts.push(bar(BAR_X + BAR_W - costW, y + 2, costW, 20, 'cost', `Taken back by the prompt line and ToolSearch: ${full(v.session.overhead)} tokens`))
-    parts.push(counter(VALUE_X, y + 17, v.session.net, 'value'))
-    y += 38
-    parts.push(`<text class="small" x="${BAR_X}" y="${y}"><tspan class="key-saved">■</tspan> net ${full(v.session.net)}   <tspan class="key-cost">■</tspan> taken back ${full(v.session.overhead)} (${pct(v.session.overhead, v.session.notSent)}) of ${full(v.session.notSent)} schema tokens not sent</text>`)
-    y += 12
-
-    // Stat tiles: what ToolSearch cost.
-    const tiles: [string, number, string][] = [
-      ['ToolSearch hops', v.session.hops, `~${full(v.session.hopTokens)} tokens (est.)`],
-      ['Empty searches', v.session.empty, `~${full(v.session.emptyTokens)} tokens (est.)`],
-      ['Extra requests', v.session.extra, `${full(v.session.extraOut)} output tokens (live)`],
-    ]
-    const tileW = (W - 2 * LABEL_X - 2 * 12) / 3
-    y += 14
-    tiles.forEach(([label, count, sub], i) => {
-      const x = LABEL_X + i * (tileW + 12)
-      parts.push(`<rect class="tile" x="${x}" y="${y}" width="${tileW}" height="64" rx="8"/>`)
-      parts.push(`<text class="small" x="${x + 12}" y="${y + 18}">${label}</text>`)
-      parts.push(counter(x + 12, y + 44, count, 'count'))
-      parts.push(`<text class="small" x="${x + 12}" y="${y + 58}">${esc(sub)}</text>`)
-    })
-    y += 64
+    for (const chart of o.charts ?? CHARTS) draw[chart]()
   }
 
   y += 22
-  parts.push(`<text class="small" x="${LABEL_X}" y="${y}">live = this session's API usage · table = README, Claude Code 2.1.318</text>`)
+  parts.push(
+    `<text class="small" x="${LABEL_X}" y="${y}">live = this session's API usage · table = README, Claude Code 2.1.318</text>`,
+  )
   y += 15
-  parts.push(`<text class="small" x="${LABEL_X}" y="${y}">CC est. = Claude Code's estimate · rough = description ÷ 4 · tokens not sent were mostly cache reads</text>`)
+  parts.push(
+    `<text class="small" x="${LABEL_X}" y="${y}">CC est. = Claude Code's estimate · rough = description ÷ 4 · tokens not sent were mostly cache reads</text>`,
+  )
   y += 12
 
   const css = (c: typeof DARK) =>

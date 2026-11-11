@@ -1,7 +1,7 @@
 {
   "name": "defer-tools",
-  "version": "0.2.0",
-  "description": "Lists rarely used built-in and host tools behind ToolSearch, so their schemas load only when a session asks for them, and shows the tokens that saves.",
+  "version": "0.3.0",
+  "description": "Lists rarely used built-in and host tools behind ToolSearch, so their schemas load only when a session asks for them, shows the tokens that saves, and lets you choose which tools to hide and what the display shows.",
   "author": {
     "name": "Edfghdrtxxx",
     "url": "https://github.com/Edfghdrtxxx"

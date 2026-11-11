@@ -50,6 +50,37 @@ export type DeferToolsSavings = {
   extraOutputTokens: number
 }
 
+/** Where the person put a tool: `defer` behind ToolSearch, `keep` in every request. */
+export type DeferToolsPlacement = 'defer' | 'keep'
+
+/** The pane's charts. */
+export type DeferToolsChart = 'hero' | 'firstRequest' | 'perTool' | 'conversation' | 'toolSearch'
+
+/** `full`: the figure and the ToolSearch counts; `number`: the figure alone; `off`: none. */
+export type DeferToolsStatusMode = 'full' | 'number' | 'off'
+
+/** The person's choices, as the settings file holds them. */
+export type DeferToolsSettings = {
+  /** Only the tools the person chose; any other follows the default list. */
+  tools: Record<string, DeferToolsPlacement>
+  /** The charts shown, in this order; one left out is hidden. */
+  charts: DeferToolsChart[]
+  animate: boolean
+  statusLine: DeferToolsStatusMode
+}
+
+/** Every tool this session offers, for the tool picker. */
+export type DeferToolsCatalogTool = {
+  name: string
+  tokens: number
+  source: DeferToolsSource
+  isMcp: boolean
+  /** Where Claude Code itself put the tool, before any plugin. */
+  engineDeferred: boolean
+  /** Where it is in this conversation: a change waits for /clear or a new session. */
+  appliedDeferred: boolean
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'defer-tools': {
@@ -58,6 +89,10 @@ declare module 'claude-code' {
       frame: number
       /** When the pane's animation last started (ms); SVG surfaces animate within a moment of it. */
       playedAt: number
+      settings: Shaped<DeferToolsSettings>
+      catalog: Shaped<DeferToolsCatalogTool[]>
+      /** Which view the pane shows. */
+      view: 'charts' | 'settings'
     }
   }
 }
