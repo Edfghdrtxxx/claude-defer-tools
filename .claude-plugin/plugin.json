@@ -1,0 +1,21 @@
+{
+  "name": "defer-tools",
+  "version": "0.1.0",
+  "description": "Lists rarely used built-in and host tools behind ToolSearch, so their schemas load only when a session asks for them.",
+  "author": { "name": "Edfghdrtxxx", "url": "https://github.com/Edfghdrtxxx" },
+  "license": "MIT",
+  "userConfig": {
+    "alsoDefer": {
+      "type": "string",
+      "title": "Also defer",
+      "description": "Comma-separated tool names to list behind ToolSearch as well, e.g. mcp__server__tool.",
+      "default": ""
+    },
+    "keepInFront": {
+      "type": "string",
+      "title": "Keep in front",
+      "description": "Comma-separated tool names from the default list to leave in the prompt, e.g. Workflow.",
+      "default": ""
+    }
+  }
+}

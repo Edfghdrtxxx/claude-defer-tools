@@ -1,0 +1,14 @@
+{
+  "name": "defer-tools",
+  "owner": { "name": "Edfghdrtxxx" },
+  "metadata": {
+    "description": "Claude Code mod that lists rarely used tools behind ToolSearch to cut start-up context"
+  },
+  "plugins": [
+    {
+      "name": "defer-tools",
+      "source": "./",
+      "description": "Lists rarely used built-in and host tools behind ToolSearch, so their schemas load only when a session asks for them"
+    }
+  ]
+}
