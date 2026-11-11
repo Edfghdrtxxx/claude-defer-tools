@@ -225,7 +225,7 @@ export const register: Register = (on, options) => {
         )}
         <Text> </Text>
         <Text dimColor>
-          live = from this session's API usage. measured (table) = README figures, Claude Code 2.1.318. Estimates are about 4 characters per token.
+          live = from this session's API usage. README table = measured with --disallowedTools on Claude Code 2.1.318. Estimates count about 4 characters per token.
         </Text>
         <Box>
           <Button key="refresh" label="Refresh estimates" onPress={() => readEngineEstimates($).catch(() => undefined)} />

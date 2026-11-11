@@ -83,6 +83,10 @@ Since 0.2.0 the mod shows its savings while you work, in the CLI and in the desk
 - **Status line**, under the prompt: `defer-tools: saves 16k tokens per request · 1 ToolSearch hop, 0 empty searches`. Turn it off with the `statusLine` option.
 - **Pane**, opened with `/defer-savings`: the full count for the current conversation. Where no pane can be drawn, the command answers with the same report as text.
 
+![The /defer-savings pane, drawn from an automated test with test data](docs/screenshots/pane-desktop.png)
+
+The picture is drawn from `tests/screenshots.test.tsx` with test data, not taken from a real session; `claude plugin test . | python3 scripts/render-screenshots.py` draws it again.
+
 The pane shows:
 
 - Saved per request now, net: the schemas not sent, minus the system-prompt line the mod adds.
@@ -96,7 +100,7 @@ Every number says where it comes from, so the display does not overstate:
 | Label | Meaning |
 | --- | --- |
 | live | From this session's API usage (input and output tokens of real requests). |
-| measured (table) | The table above: a `claude -p` run minus the same run with `--disallowedTools`, Claude Code 2.1.318. Used for `Artifact`, `Workflow`, `ScheduleWakeup`, `ReportFindings`. |
+| README table | The table above: a `claude -p` run minus the same run with `--disallowedTools`, Claude Code 2.1.318. Used for `Artifact`, `Workflow`, `ScheduleWakeup`, `ReportFindings`. |
 | Claude Code estimate | Claude Code's own estimate of an MCP tool's schema, as `/context` counts it (no API call). |
 | rough estimate | This mod's estimate from the tool's description alone, about 4 characters per token. It leaves out the schema's parameters, so it is low. Used for other tools, like the desktop app's `SearchPlugins`. |
 | estimate | The prompt line and the ToolSearch calls and results, also about 4 characters per token. |
@@ -104,9 +108,9 @@ Every number says where it comes from, so the display does not overstate:
 How it counts:
 
 - Only tools Claude Code would have kept in front count. A tool Claude Code already lists behind ToolSearch by itself (most MCP tools) is shown as "not counted".
-- Net for the conversation = schema tokens not sent over all requests, minus the prompt line on every request, minus the tokens of hops and empty searches.
+- Net for the conversation = schema tokens not sent over all requests, minus the prompt line on every request, minus the hops and empty searches with their results (estimate), minus the output tokens of the extra requests (live).
 - "Schema tokens not sent" adds the saving of every request. Most of those tokens would have been prompt-cache reads, which cost less than new input, so treat that total as context kept free, not as money saved.
-- Each hop also costs one more model request, which reads the conversation again (mostly from the cache). The pane counts those requests and their output tokens, but does not subtract the context they read.
+- Each hop also costs one more model request, which reads the conversation again (mostly from the cache). The net subtracts that request's output tokens, but not the context it reads again.
 - Only the main conversation is counted, not subagents. A `/clear` starts the counts over.
 
 ## Costs and limits

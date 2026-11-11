@@ -55,9 +55,12 @@ export const savedAtStart = (s: DeferToolsSavings): number =>
 /** Per request, after the prompt line the mod adds. */
 export const netNow = (s: DeferToolsSavings): number => savedNow(s) - s.noteTokens
 
-/** Over the conversation: schemas not sent, minus the prompt line on every request and the searches. */
+/**
+ * Over the conversation: schemas not sent, minus the prompt line on every request, the searches
+ * and their results (estimates), and the output of the extra requests that only searched (live).
+ */
 export const netSession = (s: DeferToolsSavings): number =>
-  s.tokensNotSent - s.noteTokensSent - s.hopTokens - s.emptyTokens
+  s.tokensNotSent - s.noteTokensSent - s.hopTokens - s.emptyTokens - s.extraOutputTokens
 
 /** Sums by source, for the "where the numbers come from" line. */
 export const bySource = (s: DeferToolsSavings): Record<DeferToolsSource, number> => {
@@ -91,7 +94,7 @@ export const statusLine = (s: DeferToolsSavings): string | undefined => {
 }
 
 const SOURCE_WORD: Record<DeferToolsSource, string> = {
-  table: 'measured (table)',
+  table: 'README table',
   engine: 'Claude Code estimate',
   rough: 'rough estimate',
 }
@@ -110,7 +113,7 @@ export const reportLines = (s: DeferToolsSavings, totals?: Totals): string[] => 
   lines.push(`Saved per request now: ${full(netNow(s))} tokens (net)`)
   lines.push(`  Schemas not sent: ${full(savedNow(s))}`)
   const parts = (['table', 'engine', 'rough'] as const).filter(k => sums[k] > 0).map(k => `${full(sums[k])} ${SOURCE_WORD[k]}`)
-  if (parts.length > 0) lines.push(`    of which ${parts.join(', ')}`)
+  if (parts.length > 0) lines.push(`    by source: ${parts.join(', ')}`)
   lines.push(`  Minus the prompt line the mod adds: -${full(s.noteTokens)} (estimate)`)
   if (s.firstRequestTokens !== null) {
     lines.push(`First request of this conversation: ${full(s.firstRequestTokens)} tokens (live)`)
@@ -134,7 +137,7 @@ export const reportLines = (s: DeferToolsSavings, totals?: Totals): string[] => 
   lines.push('')
   lines.push(`This conversation: ${plural(s.requests, 'request')}`)
   lines.push(`  Schema tokens not sent: ${full(s.tokensNotSent)} (mostly cache reads)`)
-  lines.push(`  Net after the prompt line and searches: ${full(netSession(s))}`)
+  lines.push(`  Net after the prompt line, the searches and the extra requests: ${full(netSession(s))}`)
   if (totals && totals.sessions > 0) {
     lines.push('')
     lines.push(`All sessions on this computer: ${plural(totals.sessions, 'session')}`)

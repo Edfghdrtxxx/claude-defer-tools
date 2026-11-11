@@ -67,7 +67,7 @@ test('counts what it defers, a hop, an empty search and the requests, on every s
     expect((await ui.find({ type: 'Text', text: /^Saved per request now/ }))?.text).toBe('Saved per request now: 12,773 tokens (net)')
     expect((await ui.find({ type: 'Text', text: /First request/ }))?.text).toBe('First request of this conversation: 21,161 tokens (live)')
     expect((await ui.find({ type: 'Text', text: /Without defer-tools/ }))?.text).toBe('  Without defer-tools: about 35,886')
-    expect((await ui.find({ type: 'Text', text: /Workflow:/ }))?.text).toBe('  Workflow: 1,952 (measured (table)), loaded by ToolSearch')
+    expect((await ui.find({ type: 'Text', text: /Workflow:/ }))?.text).toBe('  Workflow: 1,952 (README table), loaded by ToolSearch')
     expect((await ui.find({ type: 'Text', text: /Already behind/ }))?.text).toContain('mcp__visualize__read_me')
     expect((await ui.find({ type: 'Text', text: /Empty searches/ }))?.text).toMatch(/^  Empty searches: 1, about \d+ tokens \(estimate\)$/)
     expect((await ui.find({ type: 'Text', text: /Extra model requests/ }))?.text).toBe('  Extra model requests: 1, 40 output tokens (live)')
