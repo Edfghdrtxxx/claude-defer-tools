@@ -50,12 +50,55 @@ caption_font = ImageFont.truetype(SANS, 11 * SCALE)
 CELL_W = int(round(font.getlength('M')))
 
 
+# Theme keys the mod uses, as Claude Code's dark theme draws them (close enough for a picture).
+THEME = {'suggestion': 0xB1B9F9, 'subtle': 0x505050, 'text': 0xFFFFFF, 'inactive': 0x999999}
+
+
 def rgb(value, fallback):
     if value is None or value == DEFAULT:
         return fallback
+    if isinstance(value, str) and value in THEME:
+        value = THEME[value]
     if isinstance(value, str):
         value = int(value.lstrip('#'), 16)
     return ((value >> 16) & 255, (value >> 8) & 255, value & 255)
+
+
+# ------------------------------------------------------------------------------------------
+# Hover and focus: what the app does to the tree while the pointer or the keyboard is on a row
+
+
+def shown_as(tree, row_key=None, hover=True, focus=False):
+    """A copy of the tree as drawn: Boxes drawn display none are left out, except under the keyed Box
+    `row_key`, where the `hover` overrides apply (hover=True, the pointer) or only the reveal does
+    (focus=True: the mod itself shows the row's line under the keyboard focus)."""
+
+    def walk(node, inside):
+        if not isinstance(node, dict):
+            return node
+        node = dict(node)
+        props = dict(node.get('props') or {})
+        is_row = row_key is not None and props.get('key') == row_key
+        inside = inside or is_row
+        if inside and node.get('hover'):
+            over = node['hover']
+            if hover:
+                props.update({k: v for k, v in over.items() if k != 'scope'})
+            elif focus and over.get('display') == 'flex':
+                props['display'] = 'flex'
+        if inside and hover and node.get('type') == 'Text' and node.get('hover'):
+            props['_pointer'] = True
+        if inside and focus and node.get('type') == 'Button' and str(props.get('key', '')).startswith('tool:'):
+            props['_focused'] = True
+        node['props'] = props
+        if props.get('display') == 'none':
+            return None
+        kids = node.get('children')
+        if isinstance(kids, list):
+            node['children'] = [k for k in (walk(k, inside) for k in kids) if k is not None]
+        return node
+
+    return walk(tree, False)
 
 
 # ------------------------------------------------------------------------------------------
@@ -126,6 +169,9 @@ def layout(node, style=None):
         # The terminal draws a primary Button in the accent colour, a dim one dim.
         is_primary = props.get('variant') == 'primary'
         fg = ACCENT if is_primary else DIM if props.get('dimColor') else FG
+        if props.get('_focused'):
+            # The focus ring inverts the Button.
+            return [[(c, BG, FG, True) for c in f"[ {props.get('label', '')} ]"]]
         return [[(c, fg, None, is_primary) for c in f"[ {props.get('label', '')} ]"]]
     if kind == 'Select':
         current = next((o for o in props.get('options', []) if o.get('value') == props.get('value')), {})
@@ -295,6 +341,7 @@ class Desk:
     def __init__(self, width):
         self.width = width
         self.ops = []  # drawing operations, replayed once the height is known
+        self.pointer = None  # where the script draws a mouse pointer, if anywhere
 
     def measure(self, node):
         """Width of an inline node, in pixels."""
@@ -319,10 +366,13 @@ class Desk:
         props = node.get('props') or {}
         mid = y + h // 2
         if kind == 'Text':
+            x_start = x
             for t, fg, b in runs_of(node, {'fg': D_FG, 'bold': False}):
                 f = d_bold if b else d_font
                 self.ops.append(('text', (x, mid), t, f, fg))
                 x += f.getlength(t)
+            if props.get('_pointer'):
+                self.pointer = (x_start + min(x - x_start, 60 * D_SCALE) * 0.7, mid + 2 * D_SCALE)
             return x
         if kind == 'Button':
             label = props.get('label', '')
@@ -366,9 +416,11 @@ class Desk:
         kind = node.get('type')
         props = node.get('props') or {}
         if kind == 'Box' and props.get('flexDirection', 'column') == 'column':
+            # A desktop Box's margin is in spacing steps; the button column is about 80 px wide.
+            xx = x + (props.get('marginLeft') or 0) * 7.3 * D_SCALE
             for k in children_of(node):
                 if isinstance(k, dict):
-                    y = self.block(k, x, y)
+                    y = self.block(k, xx, y)
             return y
         if kind == 'Text':
             # Wrap long text at spaces.
@@ -421,7 +473,15 @@ def desktop_image(tree, caption_line):
             _, (x, ymid), t, f, fg = op
             d.text((int(x), int(ymid)), t, font=f, fill=fg, anchor='lm')
     d.text((pad, height - pad), CAPTION, font=d_small, fill=D_DIM, anchor='lm')
+    if desk.pointer:
+        draw_pointer(d, *desk.pointer, D_SCALE)
     return img
+
+
+def draw_pointer(d, x, y, scale):
+    """A mouse pointer, drawn by this script to show where the hover is (the mod draws none)."""
+    pts = [(0, 0), (0, 17), (4.5, 13), (7.5, 19.5), (10, 18.5), (7, 12), (12.5, 12)]
+    d.polygon([(x + px * scale, y + py * scale) for px, py in pts], fill=(255, 255, 255), outline=(0, 0, 0), width=max(1, int(scale)))
 
 
 # ------------------------------------------------------------------------------------------
@@ -457,10 +517,10 @@ def svg_image(svg, scale=SCALE):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    frames, statuses, svgs, stills, settings = {}, {}, {}, {}, {}
+    frames, statuses, svgs, stills, settings, explains, tips = {}, {}, {}, {}, {}, {}, {}
     for line in sys.stdin:
         tag, _, body = line.partition(' ')
-        if tag not in ('FRAME', 'STATUS', 'SVG', 'SVGFRAME', 'SETTINGS'):
+        if tag not in ('FRAME', 'STATUS', 'SVG', 'SVGFRAME', 'SETTINGS', 'EXPLAIN', 'SVGTIP'):
             continue
         d = json.loads(body)
         if tag == 'FRAME':
@@ -471,6 +531,10 @@ def main():
             svgs[d['scenario']] = d
         elif tag == 'SETTINGS':
             settings.setdefault(d['surface'], []).append(d)
+        elif tag == 'EXPLAIN':
+            explains[d['scenario']] = d['tree']
+        elif tag == 'SVGTIP':
+            tips.setdefault((d['scenario'], d['theme']), {})[d['row']] = d['svg']
         else:
             stills.setdefault((d['scenario'], d['theme']), {})[d['frame']] = d['svg']
 
@@ -517,16 +581,61 @@ def main():
         images = []
         for d in steps:
             caption = f"Step {d['step'] + 1} of {len(steps)}: {d['caption']}"
+            tree = shown_as(d['tree'])
             if surface == 'terminal':
-                lines = [[(c, ACCENT, None, True) for c in caption], []] + layout(d['tree'])
+                lines = [[(c, ACCENT, None, True) for c in caption], []] + layout(tree)
                 images.append(terminal_image(lines, 'defer-tools settings  (/defer-settings)', columns=110))
             else:
-                images.append(desktop_image(d['tree'], caption))
+                images.append(desktop_image(tree, caption))
         h = max(i.height for i in images)
         w = max(i.width for i in images)
         images = [pad_to(i, h, w) for i in images]
         save_png(images[-1], os.path.join(OUT, f'settings-{surface}.png'))
         save_gif(images, [1800] * (len(images) - 1) + [3500], os.path.join(OUT, f'settings-{surface}.gif'))
+
+    # What each tool is for: the pointer on a row (desktop), the keyboard focus on a row (terminal).
+    rows = ['Artifact', 'Bash', 'mcp__visualize__show_widget', 'Workflow', 'Read']
+    for surface, steps in settings.items():
+        first = min(steps, key=lambda d: d['step'])['tree']
+        images = []
+        for name in rows:
+            if surface == 'terminal':
+                tree = shown_as(first, f'row:{name}', hover=False, focus=True)
+                caption = f'Keyboard focus on {name} (Tab or the arrow keys): the line under it says what it does'
+                lines = [[(c, ACCENT, None, True) for c in caption], []] + layout(tree)
+                images.append(terminal_image(lines, 'defer-tools settings  (/defer-settings)', columns=110))
+            else:
+                tree = shown_as(first, f'row:{name}', hover=True)
+                images.append(desktop_image(tree, f'Pointer on {name}: the line under it says what it does (pointer drawn by this script)'))
+        h = max(i.height for i in images)
+        w = max(i.width for i in images)
+        images = [pad_to(i, h, w) for i in images]
+        kind = 'focus' if surface == 'terminal' else 'hover'
+        save_png(images[1], os.path.join(OUT, f'settings-{kind}-{surface}.png'))
+        save_gif(images, [1700] * len(images), os.path.join(OUT, f'settings-{kind}-{surface}.gif'))
+
+    # The terminal's charts with "What do these tools do?" pressed.
+    for scenario, tree in explains.items():
+        if scenario != 'cli':
+            continue
+        save_png(terminal_image(layout(shown_as(tree)), 'Token savings  (/defer-savings)'), os.path.join(OUT, f'pane-terminal-explain-{scenario}.png'))
+
+    # The SVG's hover card on each per-tool row, with a pointer drawn where the hover is.
+    import re
+
+    for (scenario, theme), by_row in tips.items():
+        if scenario != 'desktop':
+            continue
+        images = []
+        for row in sorted(by_row)[:5]:
+            svg = by_row[row]
+            m = re.search(rf'<g class="row" id="tool{row}"><rect class="hit" x="[\d.]+" y="([\d.]+)"', svg)
+            img = svg_image(svg, scale=1.5)
+            if m:
+                draw_pointer(ImageDraw.Draw(img), 120 * 1.5, (float(m.group(1)) + 8) * 1.5, 1.5)
+            images.append(img)
+        save_png(images[0], os.path.join(OUT, f'pane-{scenario}-hover-{theme}.png'))
+        save_gif(images, [1700] * len(images), os.path.join(OUT, f'pane-{scenario}-hover-{theme}.gif'))
 
 
 def pad_to(img, height, width=None):

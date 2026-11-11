@@ -79,6 +79,8 @@ export type DeferToolsCatalogTool = {
   engineDeferred: boolean
   /** Where it is in this conversation: a change waits for /clear or a new session. */
   appliedDeferred: boolean
+  /** What the tool is for, in one plain line (hooks/about.ts). */
+  about: string
 }
 
 declare module 'claude-code' {
@@ -93,6 +95,10 @@ declare module 'claude-code' {
       catalog: Shaped<DeferToolsCatalogTool[]>
       /** Which view the pane shows. */
       view: 'charts' | 'settings'
+      /** The tool whose row holds the keyboard focus in the settings view, for its explanation. */
+      focusedTool: string
+      /** Whether the terminal's per-tool chart shows a line on what each tool does. */
+      explain: boolean
     }
   }
 }

@@ -169,12 +169,33 @@ The same changes by typing, handy in the CLI:
 /defer-settings status number
 ```
 
+## What each tool is for
+
+Since 0.4.0 every tool in the lists says what it is for, in one plain line, with its tokens and whether it is hidden or loaded:
+
+- **Desktop app, VS Code, mobile:** point at a tool. In the settings view the line appears under the row; in the `/defer-savings` pane a card appears over the per-tool chart.
+- **Terminal:** a terminal pane cannot see the mouse pointer, so the settings view opens with the keyboard on its first tool, and the tool you move to with Tab or the arrow keys shows its line. In the `/defer-savings` pane, press **What do these tools do?** to add a line under each tool's bar.
+
+The lines for Claude Code's own tools and the default list are written by hand in `hooks/about.ts`. For any other tool, the line is the first sentence of the tool's own description, and an MCP tool's line names its connector.
+
+Desktop app, pointer on a tool (the pointer is drawn by the screenshot script):
+
+![The settings view with the pointer on Bash, drawn from an automated test with test data](docs/screenshots/settings-hover-desktop.gif)
+
+![The savings pane's hover card on each tool, drawn from an automated test with test data](docs/screenshots/pane-desktop-hover-dark.gif)
+
+Terminal, keyboard focus on a tool:
+
+![The terminal settings view with the focus moving down the tools, drawn from an automated test with test data](docs/screenshots/settings-focus-terminal.gif)
+
+![The terminal savings pane with the tool notes on, drawn from an automated test with test data](docs/screenshots/pane-terminal-explain-cli.png)
+
 ## Costs and limits
 
 - The first call of a deferred tool in a session takes one extra ToolSearch step.
 - The added line costs about 130 tokens in the CLI and about 290 in the desktop app.
-- The mod uses the mods API (`tool.describe`, `prompt.compose`, and for the display and settings `turn.step`, `tool.call`, `$.session.usage`, `$.ui.status`, `$.fs`, a pane) of the builds above; a later build may change it.
-- The savings display and the settings were tested with `claude plugin test` on Claude Code 2.1.322 (`tests/savings.test.tsx`, `tests/settings.test.tsx`), not yet in a live CLI or desktop session.
+- The mod uses the mods API (`tool.describe`, `prompt.compose`, and for the display and settings `turn.step`, `tool.call`, `$.session.usage`, `$.ui.status`, `$.fs`, `ui.focus`, a pane with hover) of the builds above; a later build may change it.
+- The savings display and the settings were tested with `claude plugin test` on Claude Code 2.1.322 (`tests/savings.test.tsx`, `tests/settings.test.tsx`, `tests/about.test.tsx`), not yet in a live CLI or desktop session. The test kit cannot press Tab, so the terminal's focus line is checked only up to naming the focused row.
 - Some MCP connectors expect their tools to stay in front. The Claude Docs connector's own help says its `batch`, `guide` and `update` tools are "always listed"; deferring them worked in the test above, but if a connector misbehaves, put its tools in `keepInFront` or leave them out of `alsoDefer`.
 
 ## Uninstall

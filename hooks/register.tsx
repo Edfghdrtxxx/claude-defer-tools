@@ -31,6 +31,7 @@ import {
   toggleTool,
 } from './settings'
 import type { ChartId } from './settings'
+import { aboutTool, placementWords, toolOfFocus } from './about'
 import { FRAMES, FRAME_MS, barRaster, bigNumber, ease, pct, sourceTag, svgPanel, T, visualOf } from './visual'
 
 // Tools whose full schema is sent with every request although most sessions never call them.
@@ -64,9 +65,11 @@ const frame = atom({ plugin: 'defer-tools', key: 'frame' } as const, FRAMES)
 const playedAt = atom({ plugin: 'defer-tools', key: 'playedAt' } as const, 0)
 const settingsAtom = atom({ plugin: 'defer-tools', key: 'settings' } as const, defaultSettings(), { shape: 'settings-1' })
 const catalog = atom({ plugin: 'defer-tools', key: 'catalog' } as const, [] as DeferToolsCatalogTool[], {
-  shape: 'catalog-1',
+  shape: 'catalog-2',
 })
 const view = atom({ plugin: 'defer-tools', key: 'view' } as const, 'charts' as 'charts' | 'settings')
+const focusedTool = atom({ plugin: 'defer-tools', key: 'focusedTool' } as const, '')
+const explain = atom({ plugin: 'defer-tools', key: 'explain' } as const, false)
 
 const names = (value: unknown): string[] =>
   typeof value === 'string' ? value.split(',').map(s => s.trim()).filter(Boolean) : []
@@ -296,7 +299,15 @@ export const register: Register = (on, options) => {
         const row = toolRow(e.tool, e.description, !engineDeferred)
         await update($, catalog, list => [
           ...list,
-          { name: e.tool, tokens: row.tokens, source: row.source, isMcp: row.isMcp, engineDeferred, appliedDeferred: isDeferred },
+          {
+            name: e.tool,
+            tokens: row.tokens,
+            source: row.source,
+            isMcp: row.isMcp,
+            engineDeferred,
+            appliedDeferred: isDeferred,
+            about: aboutTool(e.tool, e.description),
+          },
         ])
         if (isDeferred && (defaults.has(e.tool) || isChosen))
           await change($, sv => (sv.tools.some(t => t.name === e.tool) ? sv : { ...sv, tools: [...sv.tools, row] }))
@@ -458,10 +469,18 @@ export const register: Register = (on, options) => {
       return { text: done.text }
     }
     await update($, view, () => 'settings' as const)
-    const opened = await $.ui.open({ id: PANE, title: 'defer-tools settings' })
+    // With the keys, Tab and the arrows walk the rows and each row says what its tool does.
+    const opened = await $.ui.open({ id: PANE, title: 'defer-tools settings', focus: true })
     if (opened.isPlaced) return { text: 'Opened the defer-tools settings.' }
     return { text: settingsReport(s, await read($, catalog)) }
   })
+
+  // The terminal has no pointer to hover with: the row under the keyboard focus explains its tool.
+  on('ui.focus', { requestId: PANE }, async ($, e, next) => {
+    const result = await next(e)
+    if (result.deny === undefined) await update($, focusedTool, () => toolOfFocus(e.element)).catch(() => undefined)
+    return result
+  }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     if ((await read($, view)) === 'settings') {
@@ -469,6 +488,9 @@ export const register: Register = (on, options) => {
       const s = await read($, settingsAtom)
       const rows = [...(await read($, catalog))].sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name))
       const NAME = 40
+      // Under the name column: the button's width and the gap before the name.
+      const ABOUT_INDENT = e.surface === 'terminal' ? 11 : 12
+      const focused = await read($, focusedTool)
       const pending = rows.filter(t => placementOf(t.name, s, defaults, t.engineDeferred).isDeferred !== t.appliedDeferred)
       const nextSaved = rows.reduce((sum, t) => {
         const isDeferred = placementOf(t.name, s, defaults, t.engineDeferred).isDeferred
@@ -481,24 +503,33 @@ export const register: Register = (on, options) => {
             Hidden tools wait behind ToolSearch and load when the model asks. Tokens are per request; changes apply from
             the next /clear or new session.
           </Text>
+          <Text dimColor>
+            {e.surface === 'terminal'
+              ? 'Move with Tab or the arrow keys: the tool you are on says what it does.'
+              : 'Point at a tool to see what it does.'}
+          </Text>
           <Text>
             With these choices: about <Text bold color="#3987e5">{full(nextSaved)}</Text> schema tokens kept out of every
             request{pending.length > 0 ? ` · ${pending.length} change${pending.length === 1 ? '' : 's'} waiting for /clear` : ''}
           </Text>
           {rows.length === 0 && <Text dimColor>No tools described yet: send a first message, then open this again.</Text>}
-          {rows.map(t => {
+          {rows.map((t, i) => {
             const { isDeferred, isChosen } = placementOf(t.name, s, defaults, t.engineDeferred)
             const isPending = isDeferred !== t.appliedDeferred
+            // Each row is a hover scope: the pointer on it lights the name and shows the line under it,
+            // which the keyboard focus shows too (the terminal's way in).
             return (
+              <Box key={`row:${t.name}`} flexDirection="column">
               <Box flexDirection="row">
                 <Button
                   key={`tool:${t.name}`}
                   label={isDeferred ? 'Hidden' : 'Loaded'}
                   variant={isDeferred ? 'primary' : undefined}
+                  autoFocus={i === 0 ? true : undefined}
                   onPress={() => editSettings($, x => toggleTool(x, t.name, isDeferred)).catch(() => undefined)}
                 />
                 <Box width={NAME} marginLeft={1}>
-                  <Text>{t.name}</Text>
+                  <Text hover={{ bold: true, color: 'suggestion' }}>{t.name}</Text>
                 </Box>
                 <Box width={8} justifyContent="flex-end">
                   <Text>{full(t.tokens)}</Text>
@@ -517,6 +548,18 @@ export const register: Register = (on, options) => {
                     onPress={() => editSettings($, x => resetTool(x, t.name)).catch(() => undefined)}
                   />
                 )}
+              </Box>
+              <Box
+                display={focused === t.name ? 'flex' : 'none'}
+                hover={{ display: 'flex' }}
+                flexDirection="column"
+                marginLeft={ABOUT_INDENT}
+              >
+                <Text>{t.about}</Text>
+                <Text dimColor>
+                  {placementWords(isDeferred)} · {full(t.tokens)} tokens per request
+                </Text>
+              </Box>
               </Box>
             )
           })}
@@ -576,13 +619,16 @@ export const register: Register = (on, options) => {
     }
 
     const s = await read($, savings)
-    const v = visualOf(s)
     const settings = await read($, settingsAtom)
+    const known = new Map((await read($, catalog)).map(t => [t.name, t.about]))
+    const base = visualOf(s)
+    const v = { ...base, tools: base.tools.map(t => ({ ...t, about: known.get(t.name) ?? aboutTool(t.name, '') })) }
 
     // Terminal: big block digits and coloured bars, stepped frame by frame.
     if (e.surface === 'terminal') {
       const { Box, Text, Button, Raster } = $.ui.resolve(e) as ElementTable<'terminal'>
       const p = ease((await read($, frame)) / FRAMES)
+      const isExplaining = await read($, explain)
       const LABEL = 24
       const barW = Math.max(10, Math.min(48, e.props.bodyColumns - LABEL - 24))
       const label = (text: string) => <Text>{(text.length > LABEL - 1 ? `${text.slice(0, LABEL - 2)}…` : text).padEnd(LABEL)}</Text>
@@ -593,6 +639,12 @@ export const register: Register = (on, options) => {
           <Button key="refresh" label="Refresh estimates" onPress={() => readEngineEstimates($).catch(() => undefined)} />
           <Text> </Text>
           <Button key="settings" label="Settings" onPress={() => showSettings($).catch(() => undefined)} />
+          <Text> </Text>
+          <Button
+            key="explain"
+            label={isExplaining ? 'Hide tool notes' : 'What do these tools do?'}
+            onPress={() => void update($, explain, x => !x).catch(() => undefined)}
+          />
         </Box>
       )
       if (v.isEmpty)
@@ -639,7 +691,7 @@ export const register: Register = (on, options) => {
             : [],
         perTool: () => [
           <Text dimColor>PER TOOL, TOKENS PER REQUEST</Text>,
-          ...v.tools.map(t => (
+          ...v.tools.flatMap(t => [
             <Box flexDirection="row">
               {label(t.name)}
               <Raster key={`tool-${t.name}`} {...barRaster(barW, [{ fraction: (p * t.tokens) / maxTool, color: t.isLoaded ? T.loaded : T.saved }])} />
@@ -648,8 +700,17 @@ export const register: Register = (on, options) => {
                 {sourceTag(t.source)}
                 {t.isLoaded ? ' · loaded' : ''}
               </Text>
-            </Box>
-          )),
+            </Box>,
+            // The terminal has no hover: one press shows a line under each tool on what it does.
+            ...(isExplaining
+              ? [
+                  <Text dimColor>
+                    {''.padEnd(LABEL)}
+                    {t.about}
+                  </Text>,
+                ]
+              : []),
+          ]),
           ...(v.notCounted.length > 0 ? [<Text dimColor>Not counted (Claude Code defers them anyway): {v.notCounted.join(', ')}</Text>] : []),
         ],
         conversation: () => [
@@ -741,6 +802,7 @@ function settingsReport(s: DeferToolsSettings, rows: DeferToolsCatalogTool[]): s
   for (const t of [...rows].sort((a, b) => b.tokens - a.tokens)) {
     const { isDeferred, isChosen } = placementOf(t.name, s, defaults, t.engineDeferred)
     lines.push(`  ${isDeferred ? 'hidden' : 'loaded'}  ${t.name}: ${full(t.tokens)} (${sourceTag(t.source)})${isChosen ? ', your choice' : ''}`)
+    lines.push(`          ${t.about}`)
   }
   lines.push('', `Charts, in order: ${s.charts.join(', ') || 'none'}`, `Animation: ${s.animate ? 'on' : 'off'}`, `Status line: ${s.statusLine}`)
   lines.push('', `Change one with /${SETTINGS_COMMAND} keep <tool>, defer <tool>, charts <list>, animate on|off or status full|number|off.`)

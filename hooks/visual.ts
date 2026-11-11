@@ -1,5 +1,6 @@
 // The savings drawn as figures: an SVG for the desktop app, VS Code and mobile (animated with
 // SMIL), and coloured cells for the terminal (animated frame by frame by the hooks module).
+import { aboutTool } from './about'
 import { CHARTS } from './settings'
 import type { ChartId } from './settings'
 import type { DeferToolsSavings, DeferToolsSource } from '../types'
@@ -34,7 +35,7 @@ const LIGHT = {
   without: '#b4b3ad',
 }
 
-export type VisualTool = { name: string; tokens: number; source: DeferToolsSource; isLoaded: boolean }
+export type VisualTool = { name: string; tokens: number; source: DeferToolsSource; isLoaded: boolean; about?: string }
 
 /** What the figures show, computed once from the savings. */
 export type Visual = {
@@ -116,6 +117,25 @@ export type SvgOptions = {
   theme?: 'dark' | 'light'
   /** The charts to draw, in order; absent, all of them. */
   charts?: readonly ChartId[]
+  /** Shows one row's hover card as if pointed at, for a still picture: `tool0` is the first row. */
+  showTip?: string
+}
+
+const TIP_W = 400
+const TIP_CHARS = 62
+
+/** Splits text into lines of at most `width` characters, at spaces. */
+export const wrapWords = (text: string, width: number): string[] => {
+  const lines: string[] = []
+  let line = ''
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    if (line !== '' && line.length + 1 + word.length > width) {
+      lines.push(line)
+      line = word
+    } else line = line === '' ? word : `${line} ${word}`
+  }
+  if (line !== '') lines.push(line)
+  return lines
 }
 
 export const svgPanel = (v: Visual, o: SvgOptions): string => {
@@ -128,6 +148,10 @@ export const svgPanel = (v: Visual, o: SvgOptions): string => {
   const BAR_W = 330
   const VALUE_X = BAR_X + BAR_W + 10
 
+  // Hover cards for the per-tool rows, drawn last so they paint over every row; CSS shows one
+  // while the pointer is on its row (the row comes first among the same siblings, so `~` reaches it).
+  const tips: { id: string; rowY: number; lines: { text: string; cls: string }[] }[] = []
+
   // A bar that grows from zero, with a hover title.
   let barIndex = 0
   const bar = (x: number, yy: number, w: number, h: number, cls: string, title: string): string => {
@@ -138,7 +162,7 @@ export const svgPanel = (v: Visual, o: SvgOptions): string => {
       o.animate && width > 0
         ? `<animate attributeName="width" from="0" to="${width.toFixed(1)}" begin="${delay}s" dur="0.9s" fill="freeze" calcMode="spline" keyTimes="0;1" keySplines="0.2 0.8 0.2 1"/><set attributeName="width" to="0" begin="0s" dur="${delay}s"/>`
         : ''
-    return `<rect class="${cls}" x="${x}" y="${yy}" width="${shown.toFixed(1)}" height="${h}" rx="${Math.min(4, h / 2)}"><title>${esc(title)}</title>${anim}</rect>`
+    return `<rect class="${cls}" x="${x}" y="${yy}" width="${shown.toFixed(1)}" height="${h}" rx="${Math.min(4, h / 2)}">${title ? `<title>${esc(title)}</title>` : ''}${anim}</rect>`
   }
 
   // A number that counts up from zero.
@@ -215,26 +239,32 @@ export const svgPanel = (v: Visual, o: SvgOptions): string => {
       perTool: () => {
         section('PER TOOL, TOKENS PER REQUEST')
         const maxTool = Math.max(1, ...v.tools.map(t => t.tokens))
-        for (const t of v.tools) {
+        v.tools.forEach((t, i) => {
+          const id = `tool${i}`
           const name = t.name.length > 28 ? `${t.name.slice(0, 27)}…` : t.name
-          parts.push(`<text class="t2" x="${LABEL_X}" y="${y + 13}">${esc(name)}</text>`)
           const cls = t.isLoaded ? 'loaded' : 'saved'
-          const state = t.isLoaded ? 'loaded by ToolSearch, no longer saved' : 'not loaded, saved on every request'
+          const state = t.isLoaded
+            ? 'Loaded by ToolSearch in this conversation, so no longer saved'
+            : 'Hidden behind ToolSearch: saved on every request'
+          // The whole row is the hover target: a faint band behind it lights up.
+          parts.push(`<g class="row" id="${id}"><rect class="hit" x="${LABEL_X - 6}" y="${y - 1}" width="${W - 2 * LABEL_X + 12}" height="20" rx="4"/>`)
+          parts.push(`<text class="t2 name" x="${LABEL_X}" y="${y + 13}">${esc(name)}</text>`)
+          parts.push(bar(BAR_X, y + 2, Math.max(3, (BAR_W * t.tokens) / maxTool), 14, cls, ''))
           parts.push(
-            bar(
-              BAR_X,
-              y + 2,
-              Math.max(3, (BAR_W * t.tokens) / maxTool),
-              14,
-              cls,
-              `${t.name}: ${full(t.tokens)} tokens (${SOURCE_TAG[t.source]}), ${state}`,
-            ),
+            `<text class="value" x="${VALUE_X}" y="${y + 14}">${full(t.tokens)}<tspan class="tag"> ${SOURCE_TAG[t.source]}${t.isLoaded ? ' · loaded' : ''}</tspan></text></g>`,
           )
-          parts.push(
-            `<text class="value" x="${VALUE_X}" y="${y + 14}">${full(t.tokens)}<tspan class="tag"> ${SOURCE_TAG[t.source]}${t.isLoaded ? ' · loaded' : ''}</tspan></text>`,
-          )
+          tips.push({
+            id,
+            rowY: y,
+            lines: [
+              { text: t.name, cls: 'tip-name' },
+              ...wrapWords(t.about ?? aboutTool(t.name, ''), TIP_CHARS).map(text => ({ text, cls: 'tip-text' })),
+              { text: `${full(t.tokens)} tokens per request (${SOURCE_TAG[t.source]})`, cls: 'tip-small' },
+              { text: state, cls: 'tip-small' },
+            ],
+          })
           y += 22
-        }
+        })
         if (v.notCounted.length > 0) {
           parts.push(
             `<text class="small" x="${LABEL_X}" y="${y + 8}">Not counted (Claude Code defers them anyway): ${esc(v.notCounted.join(', '))}</text>`,
@@ -301,6 +331,19 @@ export const svgPanel = (v: Visual, o: SvgOptions): string => {
   )
   y += 12
 
+  // The hover cards: under their row, or above it where the picture would end first.
+  for (const tip of tips) {
+    const h = 14 + 17 * tip.lines.length
+    const top = tip.rowY + 22 + h <= y ? tip.rowY + 22 : tip.rowY - h - 4
+    const x = BAR_X - 40
+    parts.push(`<g class="tip" id="${tip.id}-tip"><rect class="tip-box" x="${x}" y="${top}" width="${TIP_W}" height="${h}" rx="8"/>`)
+    tip.lines.forEach((line, i) =>
+      parts.push(`<text class="${line.cls}" x="${x + 12}" y="${top + 21 + 17 * i}">${esc(line.text)}</text>`),
+    )
+    parts.push('</g>')
+  }
+  const tipCss = tips.map(t => `#${t.id}:hover~#${t.id}-tip`).join(',')
+
   const css = (c: typeof DARK) =>
     `.bg{fill:${c.surface}}.eyebrow{fill:${c.muted};font-size:11px;letter-spacing:.08em;font-weight:600}` +
     `.hero{fill:${c.text};font-size:52px;font-weight:700}` +
@@ -308,13 +351,21 @@ export const svgPanel = (v: Visual, o: SvgOptions): string => {
     `.tag{fill:${c.muted};font-weight:400;font-size:11px}.small{fill:${c.muted};font-size:11px}` +
     `.delta{fill:${c.saved};font-size:12px;font-weight:600}.count{fill:${c.text};font-size:24px;font-weight:700}` +
     `.saved{fill:${c.saved}}.cost{fill:${c.cost}}.without{fill:${c.without}}.loaded{fill:${c.grid};stroke:${c.muted};stroke-dasharray:3 2}` +
-    `.tile{fill:none;stroke:${c.grid}}.key-saved{fill:${c.saved}}.key-cost{fill:${c.cost}}`
+    `.tile{fill:none;stroke:${c.grid}}.key-saved{fill:${c.saved}}.key-cost{fill:${c.cost}}` +
+    `.hit{fill:${c.grid};fill-opacity:0}.row:hover .hit{fill-opacity:.55}.row:hover .name{fill:${c.text}}` +
+    `.tip-box{fill:${c.surface};stroke:${c.muted};stroke-width:1}.tip-name{fill:${c.text};font-size:13px;font-weight:700}` +
+    `.tip-text{fill:${c.text};font-size:12px}.tip-small{fill:${c.muted};font-size:11px}`
+  const shape =
+    `.tip{visibility:hidden;pointer-events:none}` +
+    (tipCss ? `${tipCss}{visibility:visible}` : '') +
+    (o.showTip ? `#${o.showTip}-tip{visibility:visible}#${o.showTip} .hit{fill-opacity:.55}` : '')
   const style =
-    o.theme === 'light'
+    shape +
+    (o.theme === 'light'
       ? css(LIGHT)
       : o.theme === 'dark'
         ? css(DARK)
-        : `${css(DARK)}@media (prefers-color-scheme: light){${css(LIGHT)}}`
+        : `${css(DARK)}@media (prefers-color-scheme: light){${css(LIGHT)}}`)
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${y}" viewBox="0 0 ${W} ${y}" font-family="system-ui, -apple-system, 'Segoe UI', 'DejaVu Sans', sans-serif">` +
     `<style>${style}</style>` +

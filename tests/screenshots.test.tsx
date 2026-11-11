@@ -161,6 +161,10 @@ for (const scenario of [CLI, DESKTOP]) {
       console.log(`FRAME ${JSON.stringify({ scenario: scenario.name, frame: f, tree: root })}`)
       await clock.advance(FRAME_MS)
     }
+    // The terminal's per-tool chart with its notes on, after one press.
+    await term.press({ key: 'explain' })
+    console.log(`EXPLAIN ${JSON.stringify({ scenario: scenario.name, tree: await term.find({ type: 'Box' }) })}`)
+    await term.press({ key: 'explain' })
     await term.unmount()
 
     // Status line frames: the count-up from zero after the first tool is described.
@@ -198,6 +202,11 @@ for (const scenario of [CLI, DESKTOP]) {
         await ui.unmount()
       }
     }
+
+    // The hover card of each per-tool row, as the pointer would show it (the script draws the pointer).
+    for (let i = 0; i < v.tools.length; i++)
+      for (const theme of ['dark', 'light'] as const)
+        console.log(`SVGTIP ${JSON.stringify({ scenario: scenario.name, theme, row: i, svg: svgPanel(v, { animate: false, theme, showTip: `tool${i}` }) })}`)
 
     for (let f = 0; f <= 30; f++) {
       for (const theme of ['dark', 'light'] as const)
