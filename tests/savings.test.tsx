@@ -183,3 +183,33 @@ test('the prompt line is subtracted, an MCP tool takes Claude Code estimate, and
     'session-1': { at: 1000, requests: 0, net: 0, hops: 0, emptySearches: 0 },
   })
 })
+
+test(
+  'every deferred tool gets a hint: its own words, or the first sentence of its description',
+  { options: { alsoDefer: 'AskUserQuestion,mcp__docs__batch,mcp__docs__guide' } },
+  async ($, on) => {
+    on('tool.describe', (_, e) => ({ description: e.description }))
+    on('prompt.compose', () => ({ sections: [] }))
+    on('tool.list', () => ({
+      value: [
+        { name: 'mcp__docs__batch', description: 'Runs several **doc** edits in one call. Then more text.', mcp: true },
+        { name: 'mcp__docs__guide', description: '', mcp: true },
+      ],
+    }))
+    const composed = await $.prompt.compose({
+      model: 'm',
+      promptModel: 'm',
+      surfaces: ['desktop'],
+      tools: ['AskUserQuestion', 'mcp__docs__batch', 'mcp__docs__guide', 'Bash'],
+      outputStyle: null,
+      traits: [],
+    })
+    const text = composed.sections.find(s => s.id === 'defer-tools:note')?.text ?? ''
+    expect(text).toContain(
+      'AskUserQuestion (ask the user a question with answer buttons, only for a decision that is theirs to make)',
+    )
+    expect(text).toContain('mcp__docs__batch (Runs several doc edits in one call)')
+    expect(text).toContain('mcp__docs__guide.')
+    expect(text).not.toContain('Bash')
+  },
+)

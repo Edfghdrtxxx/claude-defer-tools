@@ -31,7 +31,7 @@ import {
   toggleTool,
 } from './settings'
 import type { ChartId } from './settings'
-import { aboutTool, placementWords, toolOfFocus } from './about'
+import { aboutTool, firstSentence, placementWords, toolOfFocus } from './about'
 import { FRAMES, FRAME_MS, barRaster, bigNumber, ease, pct, sourceTag, svgPanel, svgSize, T, visualOf, chartName } from './visual'
 
 // Tools whose full schema is sent with every request although most sessions never call them.
@@ -50,6 +50,17 @@ const DEFAULTS: Record<string, string> = {
   mcp__visualize__read_me: 'setup notes for inline widgets, read before show_widget',
   mcp__visualize__show_widget: 'inline SVG or HTML widgets',
   mcp__ccd_session__read_widget_context: 'read the state of an inline widget',
+}
+
+// Hints for tools a person may choose to defer. Any other deferred tool gets the first sentence
+// of its own description, so the model always knows what a deferred tool is for.
+const HINTS: Record<string, string> = {
+  Agent: 'start a subagent for independent parallel work or a search across many files, or fork this session',
+  AskUserQuestion: 'ask the user a question with answer buttons, only for a decision that is theirs to make',
+  SendUserFile: 'send the user a file card (a report, image or built file) to open here or on another device',
+  ReadNotifications:
+    "read queued notices (pull-request activity, scheduled triggers, other sessions' messages) when a system notice says some are pending",
+  ListAgents: 'list the subagents, teammates and other sessions you can message with SendMessage',
 }
 
 const PANE = 'defer-tools-savings'
@@ -335,7 +346,20 @@ export const register: Register = (on, options) => {
     }
     const offered = e.tools.filter(tool => ours.includes(tool))
     if (offered.length === 0) return result
-    const items = offered.map(tool => (DEFAULTS[tool] ? `${tool} (${DEFAULTS[tool]})` : tool)).join('; ')
+    let described = new Map<string, string>()
+    if (offered.some(tool => !DEFAULTS[tool] && !HINTS[tool])) {
+      try {
+        described = new Map((await $.tool.list()).map(t => [t.name, t.description]))
+      } catch {
+        // Without the list, such a tool is named alone.
+      }
+    }
+    const items = offered
+      .map(tool => {
+        const hint = DEFAULTS[tool] ?? HINTS[tool] ?? firstSentence(described.get(tool) ?? '').replace(/\.$/, '')
+        return hint ? `${tool} (${hint})` : tool
+      })
+      .join('; ')
     const text =
       `These tools are available behind ToolSearch: ${items}. ` +
       'Before you call one, load it with ToolSearch, query "select:<name>".'
