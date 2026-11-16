@@ -12,7 +12,10 @@ Every picture is drawn from an automated test with test data, not taken from a r
   SVG itself is also saved, and plays in a browser.
 - Status line: the texts the mod passed to $.ui.status, in order.
 
-Needs Pillow, CairoSVG and the DejaVu Sans Mono font.
+Needs Pillow, the DejaVu Sans, DejaVu Sans Mono and Inter fonts, and CairoSVG or Google Chrome.
+Fonts are read from their Linux paths, or from the folder SCREENSHOT_FONTS names (on macOS, for
+example). Without a working CairoSVG, the SVGs are drawn by headless Chrome, at CHROME or the
+usual macOS and Linux paths.
 """
 import base64
 import json
@@ -20,15 +23,32 @@ import os
 import struct
 import sys
 
-import cairosvg
+try:
+    import cairosvg
+
+    cairosvg.svg2png(bytestring=b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>')
+except (ImportError, OSError):
+    # CairoSVG is missing or cannot find the cairo library: draw with headless Chrome instead.
+    cairosvg = None
 from PIL import Image, ImageDraw, ImageFont
+
+def font_path(linux_path):
+    """The font at its Linux path, else the file of the same name in SCREENSHOT_FONTS."""
+    if os.path.exists(linux_path):
+        return linux_path
+    folder = os.environ.get('SCREENSHOT_FONTS', '')
+    other = os.path.join(folder, os.path.basename(linux_path))
+    if folder and os.path.exists(other):
+        return other
+    sys.exit(f'font not found: {linux_path} (set SCREENSHOT_FONTS to a folder that holds {os.path.basename(linux_path)})')
+
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'docs', 'screenshots')
 CAPTION = 'Drawn from an automated test (claude plugin test, Claude Code 2.1.322) with test data. Not a real session.'
 
-MONO = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf'
-MONO_BOLD = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf'
-SANS = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+MONO = font_path('/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf')
+MONO_BOLD = font_path('/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf')
+SANS = font_path('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
 
 # Terminal look: a dark theme close to the mod's own palette.
 BG = (26, 26, 25)
@@ -309,8 +329,8 @@ D_DIM = (150, 149, 143)
 D_BLUE = (57, 135, 229)
 D_BORDER = (74, 74, 70)
 D_SCALE = 2
-INTER = '/usr/share/fonts/opentype/inter/Inter-Regular.otf'
-INTER_SEMI = '/usr/share/fonts/opentype/inter/Inter-SemiBold.otf'
+INTER = font_path('/usr/share/fonts/opentype/inter/Inter-Regular.otf')
+INTER_SEMI = font_path('/usr/share/fonts/opentype/inter/Inter-SemiBold.otf')
 d_font = ImageFont.truetype(INTER, 13 * D_SCALE)
 d_bold = ImageFont.truetype(INTER_SEMI, 13 * D_SCALE)
 d_small = ImageFont.truetype(INTER, 11 * D_SCALE)
@@ -500,10 +520,40 @@ def save_png(img, path):
     print('wrote', os.path.relpath(path))
 
 
+def chrome_png(svg, scale):
+    """The SVG drawn by headless Chrome at its own width and height, times `scale`."""
+    import re
+    import shutil
+    import subprocess
+    import tempfile
+
+    chrome = os.environ.get('CHROME') or next(
+        (p for p in ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', shutil.which('google-chrome'), shutil.which('chromium')) if p and os.path.exists(p)),
+        None,
+    )
+    if chrome is None:
+        sys.exit('needs CairoSVG with the cairo library, or Google Chrome (set CHROME to its path)')
+    root = re.search(r'<svg\b[^>]*>', svg).group(0)
+    width = round(float(re.search(r'\swidth="([\d.]+)"', root).group(1)))
+    height = round(float(re.search(r'\sheight="([\d.]+)"', root).group(1)))
+    with tempfile.TemporaryDirectory() as tmp:
+        page = os.path.join(tmp, 'panel.html')
+        with open(page, 'w', encoding='utf-8') as f:
+            f.write(f'<!doctype html><style>html,body{{margin:0}}svg{{display:block}}</style>{svg}')
+        out = os.path.join(tmp, 'panel.png')
+        subprocess.run(
+            [chrome, '--headless', '--disable-gpu', '--hide-scrollbars', f'--user-data-dir={tmp}/profile', f'--force-device-scale-factor={scale}',
+             f'--window-size={width},{height}', f'--screenshot={out}', f'file://{page}'],
+            check=True, capture_output=True,
+        )
+        with open(out, 'rb') as f:
+            return f.read()
+
+
 def svg_image(svg, scale=SCALE):
     import io
 
-    png = cairosvg.svg2png(bytestring=svg.encode(), scale=scale)
+    png = cairosvg.svg2png(bytestring=svg.encode(), scale=scale) if cairosvg else chrome_png(svg, scale)
     img = Image.open(io.BytesIO(png)).convert('RGB')
     # Add the caption under the panel.
     bg = img.getpixel((2, 2))

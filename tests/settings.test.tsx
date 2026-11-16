@@ -116,7 +116,7 @@ test('the file decides which tools wait behind ToolSearch; the picker changes it
   // After /clear, Workflow counts as saved too.
   await $.session.end({ reason: 'clear', sessionId: 's', resume: { sessionId: 's' } as never })
   await clock.advance(1000)
-  expect(statuses.at(-1)).toBe('defer-tools: ▼ 15k tokens saved per request')
+  expect(statuses.at(-1)).toBe('▼ 15k tokens saved per request')
 
   // The charts view follows the display settings: no per-tool chart.
   const desk = await $.ui.mount({ ...PANE, surface: 'desktop' })

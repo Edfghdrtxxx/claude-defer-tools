@@ -29,6 +29,8 @@ type Scenario = {
   tools: { tool: string; description: string; isDeferred?: true }[]
   mcpEstimates: { name: string; tokens: number }[]
   firstRequest: number
+  /** The settings file at the start, as ~/.claude/defer-tools.json holds it. */
+  file?: { tools: Record<string, 'defer' | 'keep'> }
 }
 
 const CLI: Scenario = {
@@ -37,6 +39,8 @@ const CLI: Scenario = {
   mcpEstimates: [],
   firstRequest: 21161,
 }
+
+const DOCS = ['batch', 'guide', 'update'].map(t => `mcp__4f0c2a7e-9b1d-4c3e-8a6f-2d5b7e9c1a30__${t}`)
 
 const DESKTOP: Scenario = {
   name: 'desktop',
@@ -48,6 +52,8 @@ const DESKTOP: Scenario = {
     { tool: 'mcp__visualize__read_me', description: 'Setup notes for widgets.' },
     { tool: 'mcp__visualize__show_widget', description: 'Show an inline widget.' },
     { tool: 'mcp__ccd_session__read_widget_context', description: 'Read widget state.', isDeferred: true },
+    // A connector whose server name is an id: the names differ only at the end.
+    ...DOCS.map(tool => ({ tool, description: 'Claude Docs: living docs you create and edit here.' })),
     // Tools the mod leaves alone by default: they show in the settings' tool picker.
     { tool: 'Bash', description: 'Executes a bash command and returns its output. '.repeat(60) },
     { tool: 'Read', description: 'Reads a file from the local filesystem. '.repeat(30) },
@@ -58,8 +64,10 @@ const DESKTOP: Scenario = {
   mcpEstimates: [
     { name: 'mcp__visualize__read_me', tokens: 412 },
     { name: 'mcp__visualize__show_widget', tokens: 1662 },
+    ...DOCS.map((name, i) => ({ name, tokens: [244, 174, 138][i] })),
   ],
   firstRequest: 54260,
+  file: { tools: Object.fromEntries(DOCS.map(t => [t, 'defer' as const])) },
 }
 
 for (const scenario of [CLI, DESKTOP]) {
@@ -78,7 +86,13 @@ for (const scenario of [CLI, DESKTOP]) {
     })
     on('store.get', () => ({ value: undefined }))
     // The settings file, kept in memory.
+    const FILE = '/home/you/.claude/defer-tools.json'
     const files = new Map<string, string>()
+    const seed = () => {
+      files.clear()
+      if (scenario.file) files.set(FILE, JSON.stringify(scenario.file))
+    }
+    seed()
     on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/you' : undefined }))
     on('fs.exists', (_, e) => ({ value: files.has(e.path) }))
     on('fs.read', (_, e) => ({ value: files.get(e.path) ?? '' }))
@@ -189,8 +203,8 @@ for (const scenario of [CLI, DESKTOP]) {
         ['Status line: number only', ui => ui.select({ key: 'status', value: 'number' })],
       ]
       for (const surface of ['terminal', 'desktop'] as const) {
-        // Each surface starts from the defaults.
-        files.clear()
+        // Each surface starts from the scenario's settings file.
+        seed()
         await $.command.run({ command: 'defer-settings', args: '', origin: { kind: 'composer' } as never, presentation: { layout: 'main', columns: 100 } as never })
         const ui = await $.ui.mount({ ...PANE, surface })
         let i = 0
