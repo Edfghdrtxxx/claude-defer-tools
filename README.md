@@ -198,6 +198,7 @@ Terminal, keyboard focus on a tool:
 
 - The first call of a deferred tool in a session takes one extra ToolSearch step.
 - The added line costs about 130 tokens in the CLI and about 290 in the desktop app with the default list; each further tool adds about 15 to 30 tokens for its name and hint.
+- A tool the desktop app adds after the session starts, such as `ReadNotifications`, arrives with its full definition and cannot be deferred; in an end-to-end check in desktop sessions, the other four hand-written tools and the three Claude Docs tools were deferred, carried their hints and loaded on request.
 - The mod uses the mods API (`tool.describe`, `prompt.compose`, and for the display and settings `turn.step`, `tool.call`, `$.session.usage`, `$.ui.status`, `$.fs`, `ui.focus`, a pane with hover) of the builds above; a later build may change it.
 - The savings display and the settings were tested with `claude plugin test` on Claude Code 2.1.322 (`tests/savings.test.tsx`, `tests/settings.test.tsx`, `tests/about.test.tsx`). The test kit cannot press Tab, so the terminal's focus line is checked only up to naming the focused row.
 - In a live desktop session (desktop app with Claude Code 2.1.321), 0.4.1 drew the pane at full width and the status line as `defer-tools ▼ 19k tokens saved per request`; the app puts the plugin's name in front. 0.4.0 drew the pane's chart 150 pixels tall there, since the app gives the chart's frame no size of its own; 0.4.1 passes the chart's size.
